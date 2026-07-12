@@ -1,0 +1,89 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: game-engine
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/game_db?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC&rewriteBatchedStatements=true
+    username: root
+    password: ""
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 15
+      connection-timeout: 30000
+      max-lifetime: 1800000
+      idle-timeout: 600000
+      pool-name: GameEngineHikariPool
+      auto-commit: true
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        batch_versioned_data: true
+
+  cache:
+    type: caffeine
+    cache-names:
+      - players
+      - games
+      - leaderboards
+    caffeine:
+      spec: maximumSize=500,expireAfterWrite=60s
+
+management:
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+  tracing:
+    sampling:
+      probability: 0.6
+  observations:
+    annotations:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+  level:
+    org.hibernate.orm.connections.pooling: WARN
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+game:
+  auth:
+    passkey:
+      rp-id: ${PASSKEY_RP_ID:localhost}
+      rp-name: ${PASSKEY_RP_NAME:Game Engine}
+      origin: ${PASSKEY_ORIGIN:http://localhost:8080}
+    jwt:
+      issuer: ${JWT_ISSUER:game-engine}
+      ttl: ${JWT_TTL:P90D}
+      active-version: ${JWT_ACTIVE_VERSION:1}
+      versions:
+        - version: 1
+          secret: ${JWT_SECRET_V1:A4u1dVqiUr5hQMB+l09QG0iH80uDsVLLfuYlgoLeLlm3XFxHIpCDwDuXWYz3CVDTkYnqM7XmgbTXfo+eJgfUqw==}

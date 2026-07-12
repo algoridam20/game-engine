@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Game Engine Passkey Test</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+      }
+      section {
+        border: 1px solid #8886;
+        border-radius: 10px;
+        padding: 16px;
+      }
+      label {
+        display: block;
+        margin: 10px 0;
+      }
+      input {
+        box-sizing: border-box;
+        display: block;
+        margin-top: 4px;
+        padding: 8px;
+        width: 100%;
+      }
+      button {
+        cursor: pointer;
+        margin: 4px 4px 4px 0;
+        padding: 8px 12px;
+      }
+      pre {
+        background: #7772;
+        border-radius: 6px;
+        max-height: 360px;
+        overflow: auto;
+        padding: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      .warning {
+        color: #d88b00;
+      }
+      #status[data-error="true"] {
+        color: #d33;
+      }
+      #page-error {
+        background: #d332;
+        border: 1px solid #d33;
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+      #page-error a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Game Engine Passkey Test</h1>
+    <p class="warning">
+      Development helper only. WebAuthn requires localhost or HTTPS. The JWT is
+      stored in this tab's session storage.
+    </p>
+    <div id="page-error" hidden></div>
+    <p id="support"></p>
+    <p id="status"></p>
+
+    <main>
+      <section class="wide">
+        <h2>Server</h2>
+        <label>
+          API base URL
+          <input
+            id="api-base"
+            value="http://localhost:8080"
+            placeholder="http://localhost:8080"
+          />
+        </label>
+        <p>
+          Open this page at
+          <a id="served-url" href="http://localhost:8080/passkey-test.html"
+            >http://localhost:8080/passkey-test.html</a
+          >
+          after starting the app. Do not open the HTML file directly from disk.
+        </p>
+      </section>
+
+      <section>
+        <h2>Sign up</h2>
+        <label>Handle <input id="signup-handle" value="player_one" /></label>
+        <label>Display name <input id="signup-display" value="Player One" /></label>
+        <label>Passkey label <input id="signup-label" value="main-device" /></label>
+        <button id="signup">Create account and passkey</button>
+      </section>
+
+      <section>
+        <h2>Log in</h2>
+        <label>
+          Handle (optional)
+          <input id="login-handle" placeholder="Leave empty for discoverable login" />
+        </label>
+        <button id="login">Log in with passkey</button>
+        <button id="clear-token">Clear token</button>
+      </section>
+
+      <section>
+        <h2>Player</h2>
+        <button id="me">Load current player</button>
+        <button id="list-passkeys">List passkeys</button>
+        <pre id="player-output">No player loaded.</pre>
+      </section>
+
+      <section>
+        <h2>Manage passkeys</h2>
+        <label>New passkey label <input id="add-label" value="second-device" /></label>
+        <button id="add-passkey">Add passkey</button>
+        <div id="passkey-list"></div>
+      </section>
+
+      <section>
+        <h2>Game token</h2>
+        <label>Game UUID <input id="game-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></label>
+        <button id="game-token">Issue replacement game token</button>
+      </section>
+
+      <section>
+        <h2>JWT contents</h2>
+        <p>Decoded locally; this display does not validate the signature.</p>
+        <pre id="jwt-output">No token stored.</pre>
+      </section>
+
+      <section class="wide">
+        <h2>Request log</h2>
+        <button id="clear-log">Clear log</button>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script>
+      const TOKEN_KEY = "game-engine-jwt";
+      const API_BASE_KEY = "game-engine-api-base";
+      const DEFAULT_API_BASE = "http://localhost:8080";
+      const logEntries = [];
+      const $ = (id) => document.getElementById(id);
+      const openedFromFile = window.location.protocol === "file:";
+
+      function normalizeBase(value) {
+        return value.replace(/\/+$/, "");
+      }
+
+      function apiBase() {
+        const value = $("api-base").value.trim();
+        return normalizeBase(value || DEFAULT_API_BASE);
+      }
+
+      function apiUrl(path) {
+        return `${apiBase()}${path}`;
+      }
+
+      function showPageError(messageHtml) {
+        const pageError = $("page-error");
+        pageError.hidden = false;
+        pageError.innerHTML = messageHtml;
+      }
+
+      function initializePageContext() {
+        const servedUrl = `${DEFAULT_API_BASE}/passkey-test.html`;
+        $("served-url").href = servedUrl;
+        $("served-url").textContent = servedUrl;
+
+        if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+          $("api-base").value = normalizeBase(window.location.origin);
+        } else {
+          const savedBase = sessionStorage.getItem(API_BASE_KEY);
+          $("api-base").value = savedBase || DEFAULT_API_BASE;
+          showPageError(
+            `This page was opened from disk (<code>file://</code>). Passkey flows work best when served by the app at <a href="${servedUrl}">${servedUrl}</a>. You can still point API base URL at a running server, but WebAuthn may fail from <code>file://</code>.`,
+          );
+        }
+
+        $("api-base").addEventListener("change", () => {
+          sessionStorage.setItem(API_BASE_KEY, apiBase());
+        });
+      }
+
+      function setStatus(message, error = false) {
+        $("status").textContent = message;
+        $("status").dataset.error = String(error);
+      }
+
+      function log(label, value) {
+        const rendered =
+          typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        logEntries.unshift(`[${new Date().toISOString()}] ${label}\n${rendered}`);
+        logEntries.length = Math.min(logEntries.length, 100);
+        $("log").textContent = logEntries.join("\n\n");
+      }
+
+      function base64UrlToBytes(value) {
+        const padding = "=".repeat((4 - (value.length % 4)) % 4);
+        const base64 = value.replace(/-/g, "+").replace(/_/g, "/") + padding;
+        const binary = atob(base64);
+        return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      }
+
+      function bytesToBase64Url(value) {
+        const bytes = new Uint8Array(value);
+        let binary = "";
+        bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
+        return btoa(binary)
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
+      }
+
+      function creationOptions(publicKey) {
+        return {
+          ...publicKey,
+          challenge: base64UrlToBytes(publicKey.challenge),
+          user: {
+            ...publicKey.user,
+            id: base64UrlToBytes(publicKey.user.id),
+          },
+          excludeCredentials: (publicKey.excludeCredentials || []).map((item) => ({
+            ...item,
+            id: base64UrlToBytes(item.id),
+          })),
+        };
+      }
+
+      function requestOptions(publicKey) {
+        return {
+          ...publicKey,
+          challenge: base64UrlToBytes(publicKey.challenge),
+          allowCredentials: (publicKey.allowCredentials || []).map((item) => ({
+            ...item,
+            id: base64UrlToBytes(item.id),
+          })),
+        };
+      }
+
+      function registrationCredential(credential) {
+        return {
+          id: credential.id,
+          rawId: bytesToBase64Url(credential.rawId),
+          type: credential.type,
+          authenticatorAttachment: credential.authenticatorAttachment,
+          clientExtensionResults: credential.getClientExtensionResults(),
+          response: {
+            clientDataJSON: bytesToBase64Url(credential.response.clientDataJSON),
+            attestationObject: bytesToBase64Url(credential.response.attestationObject),
+            transports: credential.response.getTransports
+              ? credential.response.getTransports()
+              : [],
+          },
+        };
+      }
+
+      function assertionCredential(credential) {
+        return {
+          id: credential.id,
+          rawId: bytesToBase64Url(credential.rawId),
+          type: credential.type,
+          authenticatorAttachment: credential.authenticatorAttachment,
+          clientExtensionResults: credential.getClientExtensionResults(),
+          response: {
+            clientDataJSON: bytesToBase64Url(credential.response.clientDataJSON),
+            authenticatorData: bytesToBase64Url(credential.response.authenticatorData),
+            signature: bytesToBase64Url(credential.response.signature),
+            userHandle: credential.response.userHandle
+              ? bytesToBase64Url(credential.response.userHandle)
+              : null,
+          },
+        };
+      }
+
+      async function api(path, options = {}, authenticated = false) {
+        const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+        if (authenticated) {
+          const token = sessionStorage.getItem(TOKEN_KEY);
+          if (!token) {
+            throw new Error("Log in before calling this endpoint");
+          }
+          headers.Authorization = `Bearer ${token}`;
+        }
+        const url = apiUrl(path);
+        let response;
+        try {
+          response = await fetch(url, { ...options, headers });
+        } catch (error) {
+          throw new Error(
+            `Could not reach ${url}. Start the server with "mvn spring-boot:run -pl game-server" and open ${DEFAULT_API_BASE}/passkey-test.html instead of the file on disk.`,
+          );
+        }
+        const body = await response.json().catch(() => null);
+        log(`${options.method || "GET"} ${url} → ${response.status}`, body);
+        if (!response.ok || body?.error) {
+          throw new Error(
+            body?.error?.message || `Request failed with status ${response.status}`,
+          );
+        }
+        return body?.data;
+      }
+
+      function saveToken(authResponse) {
+        sessionStorage.setItem(TOKEN_KEY, authResponse.token);
+        renderJwt();
+      }
+
+      function decodePart(part) {
+        const bytes = base64UrlToBytes(part);
+        return JSON.parse(new TextDecoder().decode(bytes));
+      }
+
+      function renderJwt() {
+        const token = sessionStorage.getItem(TOKEN_KEY);
+        if (!token) {
+          $("jwt-output").textContent = "No token stored.";
+          return;
+        }
+        try {
+          const [header, payload] = token.split(".");
+          $("jwt-output").textContent = JSON.stringify(
+            { header: decodePart(header), payload: decodePart(payload) },
+            null,
+            2,
+          );
+        } catch (error) {
+          $("jwt-output").textContent = `Unable to decode token: ${error.message}`;
+        }
+      }
+
+      async function signup() {
+        const optionsResponse = await api(
+          "/api/v1/auth/passkeys/signup/options",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              handle: $("signup-handle").value,
+              displayName: $("signup-display").value,
+              label: $("signup-label").value,
+            }),
+          },
+        );
+        const credential = await navigator.credentials.create({
+          publicKey: creationOptions(optionsResponse.publicKey),
+        });
+        const authResponse = await api("/api/v1/auth/passkeys/signup/finish", {
+          method: "POST",
+          body: JSON.stringify({
+            requestId: optionsResponse.requestId,
+            credential: registrationCredential(credential),
+          }),
+        });
+        saveToken(authResponse);
+      }
+
+      async function login() {
+        const optionsResponse = await api(
+          "/api/v1/auth/passkeys/login/options",
+          {
+            method: "POST",
+            body: JSON.stringify({ handle: $("login-handle").value || null }),
+          },
+        );
+        const credential = await navigator.credentials.get({
+          publicKey: requestOptions(optionsResponse.publicKey),
+        });
+        const authResponse = await api("/api/v1/auth/passkeys/login/finish", {
+          method: "POST",
+          body: JSON.stringify({
+            requestId: optionsResponse.requestId,
+            credential: assertionCredential(credential),
+          }),
+        });
+        saveToken(authResponse);
+      }
+
+      async function addPasskey() {
+        const optionsResponse = await api(
+          "/api/v1/player/passkeys/options",
+          {
+            method: "POST",
+            body: JSON.stringify({ label: $("add-label").value }),
+          },
+          true,
+        );
+        const credential = await navigator.credentials.create({
+          publicKey: creationOptions(optionsResponse.publicKey),
+        });
+        await api(
+          "/api/v1/player/passkeys/finish",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requestId: optionsResponse.requestId,
+              credential: registrationCredential(credential),
+            }),
+          },
+          true,
+        );
+        await listPasskeys();
+      }
+
+      async function listPasskeys() {
+        const passkeys = await api("/api/v1/player/passkeys", {}, true);
+        const container = $("passkey-list");
+        container.replaceChildren();
+        for (const passkey of passkeys) {
+          const row = document.createElement("p");
+          const text = document.createElement("span");
+          text.textContent = `${passkey.label} (${passkey.id}) `;
+          const button = document.createElement("button");
+          button.textContent = "Delete";
+          button.addEventListener("click", () =>
+            run(async () => {
+              await api(
+                `/api/v1/player/passkeys/${encodeURIComponent(passkey.id)}`,
+                { method: "DELETE" },
+                true,
+              );
+              await listPasskeys();
+            }),
+          );
+          row.append(text, button);
+          container.append(row);
+        }
+      }
+
+      async function run(action) {
+        try {
+          setStatus("Working…");
+          await action();
+          setStatus("Completed successfully.");
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || String(error), true);
+          log("Error", error.stack || String(error));
+        }
+      }
+
+      $("signup").addEventListener("click", () => run(signup));
+      $("login").addEventListener("click", () => run(login));
+      $("add-passkey").addEventListener("click", () => run(addPasskey));
+      $("list-passkeys").addEventListener("click", () => run(listPasskeys));
+      $("me").addEventListener("click", () =>
+        run(async () => {
+          $("player-output").textContent = JSON.stringify(
+            await api("/api/v1/player/me", {}, true),
+            null,
+            2,
+          );
+        }),
+      );
+      $("game-token").addEventListener("click", () =>
+        run(async () => {
+          const authResponse = await api(
+            "/api/v1/auth/token/game",
+            {
+              method: "POST",
+              body: JSON.stringify({ gameId: $("game-id").value }),
+            },
+            true,
+          );
+          saveToken(authResponse);
+        }),
+      );
+      $("clear-token").addEventListener("click", () => {
+        sessionStorage.removeItem(TOKEN_KEY);
+        renderJwt();
+        setStatus("Token cleared.");
+      });
+      $("clear-log").addEventListener("click", () => {
+        logEntries.length = 0;
+        $("log").textContent = "";
+      });
+
+      const supported =
+        !openedFromFile &&
+        window.isSecureContext &&
+        "PublicKeyCredential" in window &&
+        navigator.credentials;
+      $("support").textContent = openedFromFile
+        ? "Opened from disk. Use the served URL above for WebAuthn."
+        : supported
+          ? "WebAuthn is available in this browser."
+          : "WebAuthn is unavailable. Use localhost/HTTPS in a supported browser.";
+      for (const button of document.querySelectorAll("button")) {
+        if (!supported && !["clear-log", "clear-token"].includes(button.id)) {
+          button.disabled = true;
+        }
+      }
+      initializePageContext();
+      renderJwt();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+# Build
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+server.log
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
