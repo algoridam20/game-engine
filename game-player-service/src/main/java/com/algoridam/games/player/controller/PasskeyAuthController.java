@@ -2,7 +2,6 @@ package com.algoridam.games.player.controller;
 
 import com.algoridam.games.common.dto.GeneralResponse;
 import com.algoridam.games.player.dto.PasskeyDtos.AddPasskeyOptionsRequest;
-import com.algoridam.games.player.dto.PasskeyDtos.GameTokenRequest;
 import com.algoridam.games.player.dto.PasskeyDtos.LoginFinishRequest;
 import com.algoridam.games.player.dto.PasskeyDtos.LoginOptionsRequest;
 import com.algoridam.games.player.dto.PasskeyDtos.RegistrationFinishRequest;
@@ -40,11 +39,6 @@ public class PasskeyAuthController {
   @PostMapping("/auth/passkeys/login/finish")
   public GeneralResponse<?, Object> loginFinish(@Valid @RequestBody LoginFinishRequest request) {
     return GeneralResponse.ok(passkeyAuthService.loginFinish(request));
-  }
-
-  @PostMapping("/auth/token/game")
-  public GeneralResponse<?, Object> tokenForGame(@Valid @RequestBody GameTokenRequest request) {
-    return GeneralResponse.ok(passkeyAuthService.tokenForGame(request.gameId()));
   }
 
   @GetMapping("/player/me")

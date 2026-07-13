@@ -369,12 +369,16 @@
         saveToken(authResponse);
       }
 
-      async function login() {
+      async function login(gameId = null) {
+        const body = { handle: $("login-handle").value || null };
+        if (gameId) {
+          body.gameId = gameId;
+        }
         const optionsResponse = await api(
           "/api/v1/auth/passkeys/login/options",
           {
             method: "POST",
-            body: JSON.stringify({ handle: $("login-handle").value || null }),
+            body: JSON.stringify(body),
           },
         );
         const credential = await navigator.credentials.get({
@@ -468,15 +472,11 @@
       );
       $("game-token").addEventListener("click", () =>
         run(async () => {
-          const authResponse = await api(
-            "/api/v1/auth/token/game",
-            {
-              method: "POST",
-              body: JSON.stringify({ gameId: $("game-id").value }),
-            },
-            true,
-          );
-          saveToken(authResponse);
+          const gameId = $("game-id").value;
+          if (!gameId) {
+            throw new Error("Enter a game ID first");
+          }
+          await login(gameId);
         }),
       );
       $("clear-token").addEventListener("click", () => {

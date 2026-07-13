@@ -37,13 +37,21 @@ CREATE DATABASE game_db;
 Update `game-server/src/main/resources/application.yml` with your database credentials if they differ from the defaults (root/password).
 
 ### 3. Start the Service
-Run the application from the root directory using Maven:
+Build all modules first so `game-player-service` is on the runtime classpath, then run the server:
 
 ```bash
+mvn clean install -DskipTests
 mvn spring-boot:run -pl game-server
 ```
 
-### 4. Verify Installation
+If you changed code in a library module (for example `game-player-service`), run `mvn install` again before restarting. Running `mvn spring-boot:run -pl game-server` alone can leave Spring Security on the default configuration and return `401` on public passkey endpoints.
+### 4. Generate jwt secret
+
+```bash
+openssl rand -base64 64 | tr -d '\n'
+```
+
+### 5. Verify Installation
 Once started, the health check endpoint will be available at:
 `http://localhost:8080/api/v1/health`
 

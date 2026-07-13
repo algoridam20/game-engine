@@ -1,9 +1,9 @@
-package com.algoridam.games.player.webauthn;
+package com.algoridam.games.player.dao;
 
 import com.algoridam.games.player.entity.PlayerEntity;
 import com.algoridam.games.player.repository.PlayerRepository;
-import com.algoridam.games.player.service.PendingSignupStore;
-import com.algoridam.games.player.service.PendingSignupStore.PendingSignup;
+import com.algoridam.games.player.service.PendingSignupContext;
+import com.algoridam.games.player.service.PendingSignupContext.PendingSignup;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -15,10 +15,10 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 @RequiredArgsConstructor
-public class PlayerCredentialUserRepository implements PublicKeyCredentialUserEntityRepository {
+public class PlayerCredentialUserDao implements PublicKeyCredentialUserEntityRepository {
 
   private final PlayerRepository players;
-  private final PendingSignupStore pendingSignups;
+  private final PendingSignupContext pendingSignupContext;
 
   @Override
   public PublicKeyCredentialUserEntity findById(Bytes id) {
@@ -26,7 +26,7 @@ public class PlayerCredentialUserRepository implements PublicKeyCredentialUserEn
     return players
         .findById(playerId)
         .map(this::toCredentialUser)
-        .or(() -> pendingSignups.findById(playerId).map(this::toCredentialUser))
+        .or(() -> pendingSignupContext.findById(playerId).map(this::toCredentialUser))
         .orElse(null);
   }
 
@@ -35,14 +35,14 @@ public class PlayerCredentialUserRepository implements PublicKeyCredentialUserEn
     return players
         .findByHandle(username)
         .map(this::toCredentialUser)
-        .or(() -> pendingSignups.findByHandle(username).map(this::toCredentialUser))
+        .or(() -> pendingSignupContext.findByHandle(username).map(this::toCredentialUser))
         .orElse(null);
   }
 
   @Override
   public void save(PublicKeyCredentialUserEntity userEntity) {
     if (players.existsByHandle(userEntity.getName())
-        || pendingSignups.findByHandle(userEntity.getName()).isPresent()) {
+        || pendingSignupContext.findByHandle(userEntity.getName()).isPresent()) {
       return;
     }
     throw new IllegalArgumentException("Player must be created through the signup flow");

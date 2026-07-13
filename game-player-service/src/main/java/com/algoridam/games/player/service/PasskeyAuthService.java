@@ -18,9 +18,8 @@ import com.algoridam.games.player.repository.PlayerPasskeyRepository;
 import com.algoridam.games.player.repository.PlayerRepository;
 import com.algoridam.games.player.security.JwtService;
 import com.algoridam.games.player.security.SpringSecurityCurrentPlayerProvider;
-import com.algoridam.games.player.service.PasskeyChallengeStore.LoginChallenge;
-import com.algoridam.games.player.service.PasskeyChallengeStore.RegistrationChallenge;
-import com.algoridam.games.player.service.PendingSignupStore.PendingSignup;
+import com.algoridam.games.player.service.PasskeyCeremonyTokenService.LoginChallenge;
+import com.algoridam.games.player.service.PasskeyCeremonyTokenService.RegistrationChallenge;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
@@ -30,6 +29,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
@@ -49,8 +49,8 @@ public class PasskeyAuthService {
   private final PlayerRepository players;
   private final PlayerPasskeyRepository passkeys;
   private final WebAuthnRelyingPartyOperations relyingParty;
-  private final PasskeyChallengeStore challenges;
-  private final PendingSignupStore pendingSignups;
+  private final PasskeyCeremonyTokenService ceremonyTokens;
+  private final PendingSignupContext pendingSignupContext;
   private final JwtService jwtService;
   private final SpringSecurityCurrentPlayerProvider currentPlayerProvider;
 
@@ -62,63 +62,64 @@ public class PasskeyAuthService {
     }
     UUID playerId = UuidV7Generator.next();
     String displayName = displayNameOrDefault(request.displayName(), handle);
-    pendingSignups.save(playerId, handle, displayName);
+    String label = labelOrDefault(request.label());
+    pendingSignupContext.set(playerId, handle, displayName);
     try {
       PublicKeyCredentialCreationOptions options = createRegistrationOptions(handle);
       String requestId =
-          challenges.saveSignupRegistration(playerId, labelOrDefault(request.label()), options);
+          ceremonyTokens.issueRegistration(
+              new RegistrationChallenge(
+                  playerId,
+                  label,
+                  true,
+                  options.getChallenge().toBase64UrlString(),
+                  handle,
+                  displayName));
       return new CreationOptionsResponse(requestId, options);
-    } catch (RuntimeException exception) {
-      pendingSignups.remove(playerId);
-      throw exception;
+    } finally {
+      pendingSignupContext.clear();
     }
   }
 
   @Transactional
   public AuthTokenResponse signupFinish(RegistrationFinishRequest request) {
-    RegistrationChallenge challenge = challenges.consumeRegistration(request.requestId());
+    RegistrationChallenge challenge = ceremonyTokens.verifyRegistration(request.requestId());
     if (!challenge.signup()) {
       throw new ServiceException(ErrorCode.BAD_REQUEST);
     }
-    PendingSignup pending =
-        pendingSignups
-            .findById(challenge.playerId())
-            .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Signup expired"));
     PlayerEntity player;
     try {
-      try {
-        player =
-            players.saveAndFlush(
-                new PlayerEntity(pending.playerId(), pending.handle(), pending.displayName()));
-      } catch (DataIntegrityViolationException exception) {
-        throw new ServiceException(
-            exception, ErrorCode.DUPLICATE_REQUEST, "Duplicate signup", null);
-      }
-      try {
-        relyingParty.registerCredential(
-            new ImmutableRelyingPartyRegistrationRequest(
-                challenge.options(),
-                new RelyingPartyPublicKey(request.credential(), challenge.label())));
-      } catch (DataIntegrityViolationException exception) {
-        throw new ServiceException(
-            exception, ErrorCode.DUPLICATE_REQUEST, "Duplicate signup", null);
-      } catch (Exception exception) {
-        throw new ServiceException(
-            exception, ErrorCode.PASSKEY_VERIFICATION_FAILED, "Signup passkey failed", null);
-      }
-    } finally {
-      pendingSignups.remove(challenge.playerId());
+      player =
+          players.saveAndFlush(
+              new PlayerEntity(challenge.playerId(), challenge.handle(), challenge.displayName()));
+    } catch (DataIntegrityViolationException exception) {
+      throw new ServiceException(exception, ErrorCode.DUPLICATE_REQUEST, "Duplicate signup", null);
+    }
+    PublicKeyCredentialCreationOptions options =
+        registrationOptionsForChallenge(challenge.handle(), challenge.challenge());
+    try {
+      relyingParty.registerCredential(
+          new ImmutableRelyingPartyRegistrationRequest(
+              options, new RelyingPartyPublicKey(request.credential(), challenge.label())));
+    } catch (DataIntegrityViolationException exception) {
+      throw new ServiceException(exception, ErrorCode.DUPLICATE_REQUEST, "Duplicate signup", null);
+    } catch (Exception exception) {
+      throw new ServiceException(
+          exception, ErrorCode.PASSKEY_VERIFICATION_FAILED, "Signup passkey failed", null);
     }
     return token(player, null);
   }
 
   @Transactional(readOnly = true)
   public RequestOptionsResponse loginOptions(LoginOptionsRequest request) {
+    String handle =
+        request.handle() == null || request.handle().isBlank()
+            ? null
+            : normalizeHandle(request.handle());
     Authentication authentication;
-    if (request.handle() == null || request.handle().isBlank()) {
+    if (handle == null) {
       authentication = UsernamePasswordAuthenticationToken.unauthenticated("passkey", null);
     } else {
-      String handle = normalizeHandle(request.handle());
       if (!players.existsByHandle(handle)) {
         throw new ServiceException(ErrorCode.DATA_NOT_FOUND, "Unknown handle: " + handle);
       }
@@ -127,17 +128,23 @@ public class PasskeyAuthService {
     PublicKeyCredentialRequestOptions options =
         relyingParty.createCredentialRequestOptions(
             new ImmutablePublicKeyCredentialRequestOptionsRequest(authentication));
-    return new RequestOptionsResponse(challenges.saveLogin(options), options);
+    String requestId =
+        ceremonyTokens.issueLogin(
+            new LoginChallenge(
+                options.getChallenge().toBase64UrlString(), handle, request.gameId()));
+    return new RequestOptionsResponse(requestId, options);
   }
 
   @Transactional
   public AuthTokenResponse loginFinish(LoginFinishRequest request) {
-    LoginChallenge challenge = challenges.consumeLogin(request.requestId());
+    LoginChallenge challenge = ceremonyTokens.verifyLogin(request.requestId());
+    PublicKeyCredentialRequestOptions options =
+        requestOptionsForChallenge(challenge.handle(), challenge.challenge());
     PublicKeyCredentialUserEntity credentialUser;
     try {
       credentialUser =
           relyingParty.authenticate(
-              new RelyingPartyAuthenticationRequest(challenge.options(), request.credential()));
+              new RelyingPartyAuthenticationRequest(options, request.credential()));
     } catch (Exception exception) {
       throw new ServiceException(
           exception, ErrorCode.PASSKEY_VERIFICATION_FAILED, "Login passkey failed", null);
@@ -145,7 +152,7 @@ public class PasskeyAuthService {
     PlayerEntity player =
         playerOrThrow(
             UUID.fromString(new String(credentialUser.getId().getBytes(), StandardCharsets.UTF_8)));
-    return token(player, null);
+    return token(player, challenge.gameId());
   }
 
   @Transactional(readOnly = true)
@@ -179,13 +186,21 @@ public class PasskeyAuthService {
       throw new ServiceException(ErrorCode.DUPLICATE_REQUEST, "Duplicate passkey label");
     }
     PublicKeyCredentialCreationOptions options = createRegistrationOptions(player.getHandle());
-    String requestId = challenges.savePasskeyRegistration(player.getId(), label, options);
+    String requestId =
+        ceremonyTokens.issueRegistration(
+            new RegistrationChallenge(
+                player.getId(),
+                label,
+                false,
+                options.getChallenge().toBase64UrlString(),
+                null,
+                null));
     return new CreationOptionsResponse(requestId, options);
   }
 
   @Transactional
   public List<PasskeyResponse> addPasskeyFinish(RegistrationFinishRequest request) {
-    RegistrationChallenge challenge = challenges.consumeRegistration(request.requestId());
+    RegistrationChallenge challenge = ceremonyTokens.verifyRegistration(request.requestId());
     if (challenge.signup()) {
       throw new ServiceException(ErrorCode.BAD_REQUEST);
     }
@@ -196,11 +211,12 @@ public class PasskeyAuthService {
     if (passkeys.existsByPlayerAndLabel(player, challenge.label())) {
       throw new ServiceException(ErrorCode.DUPLICATE_REQUEST, "Duplicate passkey label");
     }
+    PublicKeyCredentialCreationOptions options =
+        registrationOptionsForChallenge(player.getHandle(), challenge.challenge());
     try {
       relyingParty.registerCredential(
           new ImmutableRelyingPartyRegistrationRequest(
-              challenge.options(),
-              new RelyingPartyPublicKey(request.credential(), challenge.label())));
+              options, new RelyingPartyPublicKey(request.credential(), challenge.label())));
     } catch (DataIntegrityViolationException exception) {
       throw new ServiceException(exception, ErrorCode.DUPLICATE_REQUEST, "Duplicate passkey", null);
     } catch (Exception exception) {
@@ -225,14 +241,44 @@ public class PasskeyAuthService {
             });
   }
 
-  @Transactional(readOnly = true)
-  public AuthTokenResponse tokenForGame(UUID gameId) {
-    return token(currentPlayerProvider.requirePlayer(), gameId);
-  }
-
   private PublicKeyCredentialCreationOptions createRegistrationOptions(String handle) {
     return relyingParty.createPublicKeyCredentialCreationOptions(
         new ImmutablePublicKeyCredentialCreationOptionsRequest(authenticated(handle)));
+  }
+
+  private PublicKeyCredentialCreationOptions registrationOptionsForChallenge(
+      String handle, String challenge) {
+    PublicKeyCredentialCreationOptions template = createRegistrationOptions(handle);
+    return PublicKeyCredentialCreationOptions.builder()
+        .rp(template.getRp())
+        .user(template.getUser())
+        .challenge(Bytes.fromBase64(challenge))
+        .pubKeyCredParams(template.getPubKeyCredParams())
+        .timeout(template.getTimeout())
+        .excludeCredentials(template.getExcludeCredentials())
+        .authenticatorSelection(template.getAuthenticatorSelection())
+        .attestation(template.getAttestation())
+        .extensions(template.getExtensions())
+        .build();
+  }
+
+  private PublicKeyCredentialRequestOptions requestOptionsForChallenge(
+      String handle, String challenge) {
+    Authentication authentication =
+        handle == null
+            ? UsernamePasswordAuthenticationToken.unauthenticated("passkey", null)
+            : authenticated(handle);
+    PublicKeyCredentialRequestOptions template =
+        relyingParty.createCredentialRequestOptions(
+            new ImmutablePublicKeyCredentialRequestOptionsRequest(authentication));
+    return PublicKeyCredentialRequestOptions.builder()
+        .challenge(Bytes.fromBase64(challenge))
+        .timeout(template.getTimeout())
+        .rpId(template.getRpId())
+        .allowCredentials(template.getAllowCredentials())
+        .userVerification(template.getUserVerification())
+        .extensions(template.getExtensions())
+        .build();
   }
 
   private PlayerResponse playerResponse(PlayerEntity player) {

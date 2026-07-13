@@ -6,16 +6,12 @@ import com.algoridam.games.common.auth.PlayerJwtValidator;
 import com.algoridam.games.player.config.AuthProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,43 +26,10 @@ public class JwtService implements PlayerJwtValidator {
 
   private final AuthProperties properties;
   private final ObjectMapper objectMapper;
-  private Map<Integer, SecretKeySpec> keysByVersion;
-
-  @PostConstruct
-  void validateConfiguration() {
-    AuthProperties.Jwt jwt = properties.jwt();
-    if (jwt == null
-        || jwt.issuer() == null
-        || jwt.issuer().isBlank()
-        || jwt.ttl() == null
-        || jwt.ttl().isNegative()
-        || jwt.ttl().isZero()
-        || jwt.versions() == null
-        || jwt.versions().isEmpty()) {
-      throw new IllegalStateException("JWT configuration is incomplete");
-    }
-
-    Map<Integer, SecretKeySpec> configuredKeys = new HashMap<>();
-    for (AuthProperties.JwtVersion version : jwt.versions()) {
-      if (version.version() <= 0
-          || version.secret() == null
-          || version.secret().length() < 16
-          || configuredKeys.put(
-                  version.version(),
-                  new SecretKeySpec(
-                      version.secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"))
-              != null) {
-        throw new IllegalStateException("JWT versions must be unique and have valid secrets");
-      }
-    }
-    if (!configuredKeys.containsKey(jwt.activeVersion())) {
-      throw new IllegalStateException("JWT active version is not configured");
-    }
-    keysByVersion = Map.copyOf(configuredKeys);
-  }
+  private final JwtKeyRegistry keyRegistry;
 
   public String generate(UUID playerId, String handle, String displayName, UUID gameId) {
-    int version = properties.jwt().activeVersion();
+    int version = keyRegistry.getActiveVersion();
     Instant now = Instant.now();
     Map<String, Object> header = Map.of("alg", ALGORITHM, "typ", "JWT", "ver", version);
     Map<String, Object> claims = new LinkedHashMap<>();
@@ -82,7 +45,10 @@ public class JwtService implements PlayerJwtValidator {
     claims.put("exp", now.plus(properties.jwt().ttl()).getEpochSecond());
 
     String unsigned = encodeJson(header) + "." + encodeJson(claims);
-    return unsigned + "." + ENCODER.encodeToString(sign(unsigned, keysByVersion.get(version)));
+    return unsigned
+        + "."
+        + ENCODER.encodeToString(
+            keyRegistry.sign(unsigned, keyRegistry.getKeysByVersion().get(version)));
   }
 
   @Override
@@ -101,13 +67,13 @@ public class JwtService implements PlayerJwtValidator {
         throw invalid("JWT header is invalid");
       }
       int headerVersion = requiredNumber(header, "ver").intValue();
-      SecretKeySpec key = keysByVersion.get(headerVersion);
+      SecretKeySpec key = keyRegistry.getKeysByVersion().get(headerVersion);
       if (key == null) {
         throw invalid("JWT version is not supported");
       }
 
       String unsigned = parts[0] + "." + parts[1];
-      byte[] expectedSignature = sign(unsigned, key);
+      byte[] expectedSignature = keyRegistry.sign(unsigned, key);
       byte[] actualSignature = DECODER.decode(parts[2]);
       if (!MessageDigest.isEqual(expectedSignature, actualSignature)) {
         throw invalid("JWT signature is invalid");
@@ -186,16 +152,6 @@ public class JwtService implements PlayerJwtValidator {
       return ENCODER.encodeToString(objectMapper.writeValueAsBytes(value));
     } catch (Exception exception) {
       throw new IllegalStateException("Unable to encode JWT", exception);
-    }
-  }
-
-  private byte[] sign(String unsigned, SecretKeySpec key) {
-    try {
-      Mac mac = Mac.getInstance("HmacSHA256");
-      mac.init(key);
-      return mac.doFinal(unsigned.getBytes(StandardCharsets.UTF_8));
-    } catch (Exception exception) {
-      throw new IllegalStateException("Unable to sign JWT", exception);
     }
   }
 }

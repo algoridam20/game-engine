@@ -1,4 +1,4 @@
-package com.algoridam.games.player.webauthn;
+package com.algoridam.games.player.dao;
 
 import com.algoridam.games.player.entity.PlayerEntity;
 import com.algoridam.games.player.entity.PlayerPasskeyEntity;
@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 @RequiredArgsConstructor
-public class PlayerUserCredentialRepository implements UserCredentialRepository {
+public class PlayerUserCredentialDao implements UserCredentialRepository {
 
   private final PlayerRepository players;
   private final PlayerPasskeyRepository passkeys;

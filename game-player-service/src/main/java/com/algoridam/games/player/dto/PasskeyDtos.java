@@ -26,7 +26,7 @@ public final class PasskeyDtos {
       @Size(max = 128) String displayName,
       @Size(max = 64) String label) {}
 
-  public record LoginOptionsRequest(@Size(max = 64) String handle) {}
+  public record LoginOptionsRequest(@Size(max = 64) String handle, UUID gameId) {}
 
   public record AddPasskeyOptionsRequest(@Size(max = 64) String label) {}
 
@@ -45,8 +45,6 @@ public final class PasskeyDtos {
       String requestId, PublicKeyCredentialRequestOptions publicKey) {}
 
   public record AuthTokenResponse(String token) {}
-
-  public record GameTokenRequest(@NotNull UUID gameId) {}
 
   public record PasskeyResponse(UUID id, String label, String credentialId, String lastUsedAt) {}
 
