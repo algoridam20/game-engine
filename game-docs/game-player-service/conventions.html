@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Conventions — game-player-service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="./">game-player-service</a>
+      <a href="hld.html">HLD</a>
+      <a href="lld.html">LLD</a>
+      <a href="conventions.html" aria-current="page">Conventions</a>
+      <a href="plan.html">Plan</a>
+    </nav>
+
+    <h1>Conventions</h1>
+
+    <h2>Packages</h2>
+    <pre><code>com.algoridam.games.player
+  controller/   HTTP only — validate + delegate
+  service/      business flows + ceremony tokens
+  security/     JWT filter, keys, current player
+  entity/       JPA tables
+  repository/   Spring Data JPA
+  dao/          WebAuthn repository adapters
+  config/       security, passkey, CORS, auto-config
+  dto/          request/response records</code></pre>
+
+    <h2>Naming</h2>
+    <ul>
+      <li>Entities: <code>*Entity</code>, tables plural (<code>players</code>, <code>player_passkeys</code>)</li>
+      <li>Repos: <code>*Repository</code> (domain JPA); DAOs: <code>*Dao</code> (framework adapter interfaces)</li>
+      <li>DTOs: nested records in <code>PasskeyDtos</code></li>
+      <li>IDs: UUID v7 via <code>UuidV7Generator</code> on <code>@PrePersist</code></li>
+    </ul>
+
+    <h2>Auth</h2>
+    <ul>
+      <li>Issue JWT only from signup/login <strong>finish</strong> (<code>JwtService.generate</code>)</li>
+      <li>Ceremony state = signed PCT in <code>requestId</code>, not server session</li>
+      <li>Validate JWT in filter; load player in provider — not in controller</li>
+      <li>Public paths only under <code>/api/v1/auth/passkeys/{signup,login}/**</code></li>
+      <li>Handles: trim + lowercase before persist/lookup</li>
+    </ul>
+
+    <h2>Errors</h2>
+    <ul>
+      <li>Throw <code>ServiceException</code> + <code>ErrorCode</code> (from game-commons)</li>
+      <li>Map integrity violations to <code>DUPLICATE_REQUEST</code></li>
+      <li>WebAuthn failures → <code>PASSKEY_VERIFICATION_FAILED</code></li>
+      <li>Last passkey delete → <code>CANNOT_DELETE_LAST_PASSKEY</code></li>
+    </ul>
+
+    <h2>game-commons vs this module</h2>
+    <table>
+      <thead>
+        <tr><th>In commons</th><th>In this service</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>PlayerJwtInfo</code>, <code>PlayerJwtValidator</code>, <code>InvalidPlayerJwtException</code></td>
+          <td>JWT issue + concrete validator (<code>JwtService</code>)</td>
+        </tr>
+        <tr>
+          <td><code>BaseEntity</code>, <code>UuidV7Generator</code>, <code>GeneralResponse</code>, <code>ErrorCode</code>, <code>ServiceException</code></td>
+          <td>Passkey/WebAuthn, entities, repos, filter, security config</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Do not put WebAuthn or player tables in commons. Other services depend on the JWT contract only.</p>
+  </div>
+</body>
+</html>
