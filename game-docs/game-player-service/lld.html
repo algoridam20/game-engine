@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLD — game-player-service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="./">game-player-service</a>
+      <a href="hld.html">HLD</a>
+      <a href="lld.html" aria-current="page">LLD</a>
+      <a href="conventions.html">Conventions</a>
+      <a href="plan.html">Plan</a>
+    </nav>
+
+    <h1>Low-Level Design</h1>
+    <p class="muted">Important classes only. Controllers are thin HTTP adapters — see API in <a href="hld.html">HLD</a>.</p>
+
+    <h2>Services</h2>
+    <table>
+      <thead>
+        <tr><th>Class</th><th>Role</th><th>Collaborators</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>PasskeyAuthService</code></td><td>Signup/login/add/delete passkey flows; issues JWT</td><td>repos, RP ops, ceremony tokens, <code>JwtService</code>, current player</td></tr>
+        <tr><td><code>PasskeyCeremonyTokenService</code></td><td>Issue/verify short-lived PCT tokens for options→finish</td><td><code>JwtKeyRegistry</code></td></tr>
+        <tr><td><code>JwtService</code></td><td>Issue/validate player JWT; implements <code>PlayerJwtValidator</code></td><td><code>AuthProperties</code>, <code>JwtKeyRegistry</code></td></tr>
+        <tr><td><code>PendingSignupContext</code></td><td>ThreadLocal pre-persist user for WebAuthn options during signup</td><td><code>PlayerCredentialUserDao</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Security</h2>
+    <table>
+      <thead>
+        <tr><th>Class</th><th>Role</th><th>Collaborators</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>JwtAuthenticationFilter</code></td><td>Bearer JWT → <code>SecurityContext</code> (<code>PlayerJwtInfo</code>)</td><td><code>PlayerJwtValidator</code></td></tr>
+        <tr><td><code>JwtKeyRegistry</code></td><td>Versioned HMAC secrets; sign helper</td><td><code>AuthProperties</code></td></tr>
+        <tr><td><code>SpringSecurityCurrentPlayerProvider</code></td><td>Resolve authenticated <code>PlayerEntity</code> from context</td><td><code>PlayerRepository</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Persistence</h2>
+    <table>
+      <thead>
+        <tr><th>Class</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>PlayerEntity</code></td><td><code>players</code> row; handle + display name</td></tr>
+        <tr><td><code>PlayerPasskeyEntity</code></td><td><code>player_passkeys</code> row; maps ↔ WebAuthn <code>CredentialRecord</code></td></tr>
+        <tr><td><code>PlayerRepository</code></td><td>JPA: by id/handle, <code>existsByHandle</code></td></tr>
+        <tr><td><code>PlayerPasskeyRepository</code></td><td>JPA: by credential, player, label, count</td></tr>
+        <tr><td><code>PlayerCredentialUserDao</code></td><td><code>PublicKeyCredentialUserEntityRepository</code> bridge (DB + pending signup)</td></tr>
+        <tr><td><code>PlayerUserCredentialDao</code></td><td><code>UserCredentialRepository</code> bridge (save/load/delete credentials)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Config</h2>
+    <table>
+      <thead>
+        <tr><th>Class</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>SecurityConfig</code></td><td>Stateless chain; public auth paths; JWT filter</td></tr>
+        <tr><td><code>PasskeyConfig</code></td><td>WebAuthn RP ops + Jackson module</td></tr>
+        <tr><td><code>AuthProperties</code></td><td><code>game.auth.passkey</code> + <code>game.auth.jwt</code></td></tr>
+        <tr><td><code>JwtFilterConfig</code></td><td>Registers <code>JwtAuthenticationFilter</code> bean</td></tr>
+        <tr><td><code>PlayerServiceAutoConfiguration</code></td><td>Component scan + enable properties</td></tr>
+        <tr><td><code>CorsConfig</code></td><td>CORS</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Key call paths</h2>
+    <ul>
+      <li><strong>Signup finish:</strong> ceremony verify → save player → <code>relyingParty.registerCredential</code> → DAO saves passkey → JWT</li>
+      <li><strong>Login finish:</strong> ceremony verify → <code>relyingParty.authenticate</code> → load player by WebAuthn user id → JWT</li>
+      <li><strong>Protected API:</strong> filter sets <code>PlayerJwtInfo</code> → provider loads entity → service</li>
+    </ul>
+  </div>
+</body>
+</html>

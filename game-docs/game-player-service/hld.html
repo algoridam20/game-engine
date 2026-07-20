@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HLD — game-player-service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/style.css" />
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="./">game-player-service</a>
+      <a href="hld.html" aria-current="page">HLD</a>
+      <a href="lld.html">LLD</a>
+      <a href="conventions.html">Conventions</a>
+      <a href="plan.html">Plan</a>
+    </nav>
+
+    <h1>High-Level Design</h1>
+
+    <h2>Role</h2>
+    <p>Owns <strong>player identity</strong>, <strong>WebAuthn passkeys</strong>, and <strong>JWT issuance/validation</strong>.</p>
+    <p>Consumed as a Spring Boot module (auto-config). Shared JWT types live in <code>game-commons</code>; other services validate player JWTs via <code>PlayerJwtValidator</code>.</p>
+    <pre><code>Client ──► game-player-service ──► DB (players, player_passkeys)
+                │
+                ├── issues JWT (signup/login finish)
+                └── validates JWT (filter) for /player/**
+Other services ──► PlayerJwtValidator (game-commons contract)</code></pre>
+
+    <h2>Auth model</h2>
+    <table>
+      <thead>
+        <tr><th>Token</th><th>Type</th><th>TTL</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Ceremony (<code>requestId</code>)</td>
+          <td>PCT (HS256)</td>
+          <td>5 min</td>
+          <td>Bridge options → finish; holds challenge + signup context</td>
+        </tr>
+        <tr>
+          <td>Session JWT</td>
+          <td>JWT (HS256)</td>
+          <td>configurable</td>
+          <td>Bearer auth for <code>/player/**</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Flow: <strong>options</strong> → ceremony token → client WebAuthn → <strong>finish</strong> → JWT.</p>
+    <p>Public (no JWT): <code>/api/v1/auth/passkeys/signup/**</code>, <code>/api/v1/auth/passkeys/login/**</code><br />
+       Authenticated: <code>/api/v1/player/**</code></p>
+
+    <h2>API</h2>
+    <p>Base: <code>/api/v1</code>. Responses wrapped in <code>GeneralResponse</code>.</p>
+    <table>
+      <thead>
+        <tr><th>Method</th><th>Path</th><th>Auth</th><th>Request</th><th>Response data</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>POST</td><td><code>/auth/passkeys/signup/options</code></td><td>—</td><td><code>{ handle, displayName?, label? }</code></td><td><code>{ requestId, publicKey }</code></td></tr>
+        <tr><td>POST</td><td><code>/auth/passkeys/signup/finish</code></td><td>—</td><td><code>{ requestId, credential }</code></td><td><code>{ token }</code></td></tr>
+        <tr><td>POST</td><td><code>/auth/passkeys/login/options</code></td><td>—</td><td><code>{ handle?, gameId? }</code></td><td><code>{ requestId, publicKey }</code></td></tr>
+        <tr><td>POST</td><td><code>/auth/passkeys/login/finish</code></td><td>—</td><td><code>{ requestId, credential }</code></td><td><code>{ token }</code></td></tr>
+        <tr><td>GET</td><td><code>/player/me</code></td><td>JWT</td><td>—</td><td>player + passkeys</td></tr>
+        <tr><td>GET</td><td><code>/player/passkeys</code></td><td>JWT</td><td>—</td><td>passkey list</td></tr>
+        <tr><td>POST</td><td><code>/player/passkeys/options</code></td><td>JWT</td><td><code>{ label? }</code></td><td><code>{ requestId, publicKey }</code></td></tr>
+        <tr><td>POST</td><td><code>/player/passkeys/finish</code></td><td>JWT</td><td><code>{ requestId, credential }</code></td><td>passkey list</td></tr>
+        <tr><td>DELETE</td><td><code>/player/passkeys/{passkeyId}</code></td><td>JWT</td><td>—</td><td>null (cannot delete last)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Sequences</h2>
+
+    <h3>Signup</h3>
+    <pre class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as PasskeyAuthService
+  participant CT as CeremonyToken
+  participant RP as WebAuthn RP
+  participant DB as DB
+
+  C->>S: POST signup/options (handle)
+  S->>DB: existsByHandle?
+  S->>CT: issueRegistration (challenge, playerId, handle…)
+  S-->>C: requestId + creation options
+  C->>C: navigator.credentials.create
+  C->>S: POST signup/finish (requestId, credential)
+  S->>CT: verifyRegistration
+  S->>DB: save PlayerEntity
+  S->>RP: registerCredential
+  RP->>DB: save PlayerPasskeyEntity
+  S-->>C: JWT
+    </pre>
+
+    <h3>Login</h3>
+    <pre class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as PasskeyAuthService
+  participant CT as CeremonyToken
+  participant RP as WebAuthn RP
+  participant DB as DB
+
+  C->>S: POST login/options (handle?, gameId?)
+  S->>CT: issueLogin (challenge, handle?, gameId?)
+  S-->>C: requestId + request options
+  C->>C: navigator.credentials.get
+  C->>S: POST login/finish (requestId, credential)
+  S->>CT: verifyLogin
+  S->>RP: authenticate
+  RP->>DB: load credential / update signature count
+  S-->>C: JWT (optional gameId claim)
+    </pre>
+
+    <h3>Authenticated request</h3>
+    <pre class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant F as JwtAuthenticationFilter
+  participant P as CurrentPlayerProvider
+  participant S as PasskeyAuthService
+
+  C->>F: Authorization: Bearer JWT
+  F->>F: validate → SecurityContext(PlayerJwtInfo)
+  C->>S: GET /player/me
+  S->>P: requirePlayer()
+  P->>P: load PlayerEntity by JWT sub
+  S-->>C: PlayerResponse
+    </pre>
+
+    <h2>DB schema &amp; indexes</h2>
+    <p>IDs are UUID v7 stored as <code>CHAR(36)</code>. Both tables extend <code>BaseEntity</code>: <code>created_at</code>, <code>updated_at</code>, <code>version</code>.</p>
+
+    <h3><code>players</code></h3>
+    <table>
+      <thead>
+        <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>id</code></td><td>CHAR(36) PK</td><td>UUID v7</td></tr>
+        <tr><td><code>handle</code></td><td>VARCHAR(64) NOT NULL</td><td>normalized lowercase; length 3–64 (check)</td></tr>
+        <tr><td><code>display_name</code></td><td>VARCHAR(128) NOT NULL</td><td></td></tr>
+        <tr><td><code>created_at</code> / <code>updated_at</code></td><td>timestamp</td><td></td></tr>
+        <tr><td><code>version</code></td><td>bigint</td><td>optimistic lock</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Indexes / constraints</strong></p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Columns</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>PK</td><td>primary</td><td><code>id</code></td></tr>
+        <tr><td><code>uk_players_handle</code></td><td>unique</td><td><code>handle</code></td></tr>
+        <tr><td><code>ck_players_handle_length</code></td><td>check</td><td><code>char_length(handle) between 3 and 64</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3><code>player_passkeys</code></h3>
+    <table>
+      <thead>
+        <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>id</code></td><td>CHAR(36) PK</td><td>UUID v7</td></tr>
+        <tr><td><code>player_id</code></td><td>CHAR(36) NOT NULL</td><td>FK → <code>players.id</code></td></tr>
+        <tr><td><code>credential_id</code></td><td>VARCHAR(512) NOT NULL</td><td>base64url</td></tr>
+        <tr><td><code>credential_type</code></td><td>VARCHAR(32)</td><td></td></tr>
+        <tr><td><code>public_key</code></td><td>LOB</td><td>COSE</td></tr>
+        <tr><td><code>signature_count</code></td><td>bigint ≥ 0</td><td></td></tr>
+        <tr><td><code>uv_initialized</code> / <code>backup_eligible</code> / <code>backup_state</code></td><td>boolean</td><td></td></tr>
+        <tr><td><code>transports</code></td><td>VARCHAR(256)</td><td>comma-separated</td></tr>
+        <tr><td><code>attestation_object</code> / <code>attestation_client_data_json</code></td><td>LOB</td><td></td></tr>
+        <tr><td><code>label</code></td><td>VARCHAR(64)</td><td>default <code>"default"</code></td></tr>
+        <tr><td><code>last_used_at</code></td><td>timestamp nullable</td><td></td></tr>
+        <tr><td><code>credential_created_at</code></td><td>timestamp</td><td></td></tr>
+        <tr><td><code>created_at</code> / <code>updated_at</code> / <code>version</code></td><td></td><td>from BaseEntity</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Indexes / constraints</strong></p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Columns</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>PK</td><td>primary</td><td><code>id</code></td></tr>
+        <tr><td><code>uk_player_passkeys_credential_id</code></td><td>unique</td><td><code>credential_id</code></td></tr>
+        <tr><td><code>uk_player_passkeys_label</code></td><td>unique</td><td><code>(player_id, label)</code></td></tr>
+        <tr><td><code>fk_player_passkeys_player</code></td><td>FK</td><td><code>player_id</code> → <code>players.id</code></td></tr>
+        <tr><td><code>ck_player_passkeys_signature_count</code></td><td>check</td><td><code>signature_count &gt;= 0</code></td></tr>
+      </tbody>
+    </table>
+    <p>Lookup coverage: handle → <code>uk_players_handle</code>; credential → <code>uk_player_passkeys_credential_id</code>; passkeys by player → left prefix of <code>uk_player_passkeys_label</code>.</p>
+  </div>
+</body>
+</html>

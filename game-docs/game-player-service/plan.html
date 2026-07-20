@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plan — game-player-service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="./">game-player-service</a>
+      <a href="hld.html">HLD</a>
+      <a href="lld.html">LLD</a>
+      <a href="conventions.html">Conventions</a>
+      <a href="plan.html" aria-current="page">Plan</a>
+    </nav>
+
+    <h1>Documentation Plan</h1>
+
+    <h2>Deliverables</h2>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><a href="hld.html"><code>hld.html</code></a></td><td>High-level design, API sequences, DB schema &amp; indexes</td></tr>
+        <tr><td><a href="lld.html"><code>lld.html</code></a></td><td>Important classes and their roles</td></tr>
+        <tr><td><a href="conventions.html"><code>conventions.html</code></a></td><td>Code conventions for this service</td></tr>
+      </tbody>
+    </table>
+
+    <h2>1. HLD — High-level design &amp; API sequence</h2>
+    <p><strong>Cover:</strong></p>
+    <ul>
+      <li>What the service owns (player identity, passkey auth, JWT)</li>
+      <li>How it fits with other services (game-server, game-commons)</li>
+      <li>Main flows as sequence diagrams: registration, login, JWT filter path</li>
+      <li>Public API endpoints (method, path, request/response shape)</li>
+      <li>Auth model (ceremony tokens → JWT → filter)</li>
+      <li>DB schema (<code>players</code>, <code>player_passkeys</code>) and indexes / unique constraints</li>
+    </ul>
+    <p class="muted">Skip: infra, deployment.</p>
+
+    <h2>2. LLD — Important classes</h2>
+    <p><strong>Cover (name + one-line role + key collaborators):</strong></p>
+    <ul>
+      <li>Services — <code>PasskeyAuthService</code>, <code>PasskeyCeremonyTokenService</code>, <code>JwtService</code>, <code>PendingSignupContext</code></li>
+      <li>Security — <code>JwtAuthenticationFilter</code>, <code>JwtKeyRegistry</code>, <code>SpringSecurityCurrentPlayerProvider</code></li>
+      <li>Persistence — entities, repos, DAOs</li>
+      <li>Config — <code>SecurityConfig</code>, <code>PasskeyConfig</code>, <code>AuthProperties</code>, auto-config</li>
+    </ul>
+    <p class="muted">Skip: controllers, DTOs field-by-field, generated/boilerplate.</p>
+
+    <h2>3. Conventions</h2>
+    <p><strong>Cover only what this service cares about:</strong></p>
+    <ul>
+      <li>Package layout</li>
+      <li>Naming (entities, repos, DTOs, auth types)</li>
+      <li>Auth/security rules</li>
+      <li>Error handling style</li>
+      <li>What belongs in game-commons vs this module</li>
+    </ul>
+    <p class="muted">Skip: generic Java style already covered elsewhere.</p>
+
+    <h2>Order</h2>
+    <ol>
+      <li><a href="hld.html">HLD</a></li>
+      <li><a href="lld.html">LLD</a></li>
+      <li><a href="conventions.html">Conventions</a></li>
+    </ol>
+    <p>Keep each page short. Prefer diagrams and tables over prose.</p>
+  </div>
+</body>
+</html>
