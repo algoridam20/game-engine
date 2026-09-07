@@ -20,6 +20,8 @@ public class SevenEightGameSet {
   private final String roomId;
   private final String playerAId;
   private final String playerBId;
+  private final String playerAHandle;
+  private final String playerBHandle;
   private int playerAScore;
   private int playerBScore;
   private final int totalRounds;
@@ -27,10 +29,18 @@ public class SevenEightGameSet {
   private String currGameId;
   private SevenEightGameState currGameState;
 
-  public SevenEightGameSet(String roomId, String playerAId, String playerBId, int totalRounds) {
+  public SevenEightGameSet(
+      String roomId,
+      String playerAId,
+      String playerBId,
+      String playerAHandle,
+      String playerBHandle,
+      int totalRounds) {
     this.roomId = roomId;
     this.playerAId = playerAId;
     this.playerBId = playerBId;
+    this.playerAHandle = playerAHandle;
+    this.playerBHandle = playerBHandle;
     this.totalRounds = totalRounds;
     this.createAt = Instant.now();
     currRoundNumber = 1;
@@ -51,10 +61,11 @@ public class SevenEightGameSet {
     boolean gameOver = isGameOver();
     int myScore = playerId.equals(playerAId) ? playerAScore : playerBScore;
     int theirScore = playerId.equals(playerAId) ? playerBScore : playerAScore;
-    SevenEightPlayer self =
-        players[playerIndex].getPlayersVisibleState(currGameState.isPreGame());
+    SevenEightPlayer self = players[playerIndex].getPlayersVisibleState(currGameState.isPreGame());
     SevenEightPlayer opponent =
         getOpponentsVisibleState(players[opponentIndex], currGameState.isPreGame());
+    self.setHandle(handleFor(playerId));
+    opponent.setHandle(handleFor(players[opponentIndex].getPlayerId()));
     if (gameOver) {
       self.setWinner(myScore > theirScore);
       opponent.setWinner(theirScore > myScore);
@@ -111,6 +122,13 @@ public class SevenEightGameSet {
       throw new ServiceException(ErrorCode.BAD_REQUEST);
     }
     currGameState.playCard(playerId, card);
+  }
+
+  private String handleFor(String playerId) {
+    if (playerId.equals(playerAId)) {
+      return playerAHandle;
+    }
+    return playerBHandle;
   }
 
   private boolean isGameOver() {

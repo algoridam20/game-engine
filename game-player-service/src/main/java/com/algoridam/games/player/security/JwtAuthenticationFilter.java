@@ -20,6 +20,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final PlayerJwtValidator playerJwtValidator;
 
   @Override
+  protected boolean shouldNotFilter(HttpServletRequest request) {
+    return isWebSocketPath(request.getServletPath()) || isWebSocketPath(request.getRequestURI());
+  }
+
+  private static boolean isWebSocketPath(String path) {
+    return path != null && ("/ws".equals(path) || path.startsWith("/ws/"));
+  }
+
+  @Override
   protected void doFilterInternal(
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {

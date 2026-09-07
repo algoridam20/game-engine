@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STOMP — Game Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/dev/style.css" />
+</head>
+<body>
+  <div class="wrap-wide">
+    <nav class="top">
+      <a class="brand" href="/dev/">Game Engine</a>
+      <a href="/dev/architecture.html">Architecture</a>
+      <a href="/dev/passkeys.html">Passkeys</a>
+      <a href="/dev/stomp.html" aria-current="page">STOMP</a>
+      <a href="/swagger-ui.html">OpenAPI</a>
+    </nav>
+    <h1>STOMP inspector</h1>
+    <p class="warning">
+      Captures inbound CONNECT/SUBSCRIBE/SEND, outbound MESSAGE, and the full game snapshot
+      each time it is published (last 500 frames). Keep this open while the Next.js app plays
+      on port 3000.
+    </p>
+    <div class="toolbar">
+      <label>
+        Channel
+        <select id="channel-filter">
+          <option value="">All channels</option>
+        </select>
+      </label>
+      <label>
+        Direction
+        <select id="direction-filter">
+          <option value="">IN + OUT + PUBLISH</option>
+          <option value="IN">IN (client → server)</option>
+          <option value="OUT">OUT (server → client)</option>
+          <option value="PUBLISH">PUBLISH (game snapshot)</option>
+        </select>
+      </label>
+      <label>
+        <input id="live" type="checkbox" checked />
+        Live (1s)
+      </label>
+      <button id="refresh" type="button">Refresh</button>
+      <button id="clear" type="button">Clear</button>
+      <span id="status" class="meta"></span>
+    </div>
+    <section class="panel snapshots">
+      <div class="meta">Latest published snapshots</div>
+      <div id="snapshots">No snapshots yet. Play or wait for a game-state publish.</div>
+    </section>
+    <div class="stomp-layout">
+      <aside class="panel channels">
+        <div class="meta">Channels seen</div>
+        <div id="channel-list"></div>
+      </aside>
+      <section class="panel">
+        <div id="count" class="meta">No frames yet.</div>
+        <div id="events"></div>
+      </section>
+    </div>
+  </div>
+  <script>
+    const channelFilter = document.getElementById("channel-filter");
+    const directionFilter = document.getElementById("direction-filter");
+    const live = document.getElementById("live");
+    const status = document.getElementById("status");
+    const count = document.getElementById("count");
+    const eventsEl = document.getElementById("events");
+    const channelList = document.getElementById("channel-list");
+    const snapshotsEl = document.getElementById("snapshots");
+    let selectedChannel = "";
+    let timer = null;
+
+    function pretty(payload) {
+      if (!payload) return "";
+      try {
+        return JSON.stringify(JSON.parse(payload), null, 2);
+      } catch {
+        return payload;
+      }
+    }
+
+    function render(data) {
+      const channels = data.channels || [];
+      const current = channelFilter.value;
+      channelFilter.innerHTML = '<option value="">All channels</option>';
+      channels.forEach((channel) => {
+        const option = document.createElement("option");
+        option.value = channel;
+        option.textContent = channel;
+        channelFilter.appendChild(option);
+      });
+      if (channels.includes(current)) {
+        channelFilter.value = current;
+      }
+      channelList.innerHTML = "";
+      const allBtn = document.createElement("button");
+      allBtn.textContent = "All channels";
+      allBtn.className = selectedChannel === "" ? "active" : "";
+      allBtn.onclick = () => {
+        selectedChannel = "";
+        channelFilter.value = "";
+        render(data);
+      };
+      channelList.appendChild(allBtn);
+      channels.forEach((channel) => {
+        const button = document.createElement("button");
+        button.textContent = channel;
+        button.className = selectedChannel === channel ? "active" : "";
+        button.onclick = () => {
+          selectedChannel = channel;
+          channelFilter.value = channel;
+          render(data);
+        };
+        channelList.appendChild(button);
+      });
+
+      const direction = directionFilter.value;
+      const channel = channelFilter.value || selectedChannel;
+      const snapshots = (data.snapshots || []).filter((event) => {
+        if (channel && event.destination !== channel) return false;
+        return true;
+      });
+      snapshotsEl.innerHTML =
+        snapshots.length === 0
+          ? "No snapshots yet. Play or wait for a game-state publish."
+          : snapshots
+              .map((event) => {
+                return (
+                  '<article class="event">' +
+                  "<header>" +
+                  '<strong class="dir-PUBLISH">PUBLISH</strong>' +
+                  "<span>SNAPSHOT</span>" +
+                  "<span>" +
+                  (event.destination || "—") +
+                  "</span>" +
+                  '<span class="meta">' +
+                  event.at +
+                  "</span>" +
+                  "</header>" +
+                  (event.payload ? "<pre>" + escapeHtml(pretty(event.payload)) + "</pre>" : "") +
+                  "</article>"
+                );
+              })
+              .join("");
+
+      const events = (data.events || []).filter((event) => {
+        if (channel && event.destination !== channel) return false;
+        if (direction && event.direction !== direction) return false;
+        return true;
+      });
+      count.textContent =
+        events.length +
+        " frame(s)" +
+        (channel ? " on " + channel : "") +
+        " · " +
+        (data.events || []).length +
+        " captured";
+      eventsEl.innerHTML = events
+        .slice()
+        .reverse()
+        .map((event) => {
+          return (
+            '<article class="event">' +
+            "<header>" +
+            '<strong class="dir-' +
+            event.direction +
+            '">' +
+            event.direction +
+            "</strong>" +
+            "<span>" +
+            (event.command || "—") +
+            "</span>" +
+            "<span>" +
+            (event.destination || "—") +
+            "</span>" +
+            '<span class="meta">' +
+            event.at +
+            "</span>" +
+            "</header>" +
+            (event.payload ? "<pre>" + escapeHtml(pretty(event.payload)) + "</pre>" : "") +
+            "</article>"
+          );
+        })
+        .join("");
+      status.textContent = "Updated " + new Date().toLocaleTimeString();
+    }
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/v1/debug/stomp");
+        if (!response.ok) {
+          status.textContent = "HTTP " + response.status;
+          return;
+        }
+        render(await response.json());
+      } catch (error) {
+        status.textContent = String(error);
+      }
+    }
+
+    document.getElementById("refresh").onclick = refresh;
+    document.getElementById("clear").onclick = async () => {
+      await fetch("/api/v1/debug/stomp", { method: "DELETE" });
+      selectedChannel = "";
+      await refresh();
+    };
+    channelFilter.onchange = () => {
+      selectedChannel = channelFilter.value;
+      refresh();
+    };
+    directionFilter.onchange = refresh;
+    live.onchange = () => {
+      if (timer) clearInterval(timer);
+      if (live.checked) timer = setInterval(refresh, 1000);
+    };
+    refresh();
+    timer = setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

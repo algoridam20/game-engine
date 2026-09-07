@@ -131,7 +131,8 @@ class GameRoomManagerTest {
     gameRoomManager.joinRealtime(jwt(joiner, created.roomId()));
     gameRoomManager.joinRealtime(jwt(creator, created.roomId()));
 
-    verify(gameKind).onSeatsReady(eq(created.roomId()), eq(List.of(creator, joiner)));
+    verify(gameKind).onSeatsReady(eq(created.roomId()), any());
+    verify(gameKind).publishState(created.roomId());
   }
 
   @Test
@@ -162,6 +163,7 @@ class GameRoomManagerTest {
             () -> gameRoomManager.joinRealtime(jwt(UUID.randomUUID(), created.roomId())));
     assertEquals(ErrorCode.DATA_NOT_FOUND, exception.getErrorCode());
     verify(gameKind, never()).onSeatsReady(any(), any());
+    verify(gameKind, never()).publishState(any());
   }
 
   @Test

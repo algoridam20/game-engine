@@ -1,6 +1,7 @@
 package com.algoridam.games.seveneight.game;
 
 import com.algoridam.games.service.game.GameKind;
+import com.algoridam.games.service.model.RoomSeat;
 import com.algoridam.games.seveneight.service.SevenEightGameManager;
 import java.util.List;
 import java.util.UUID;
@@ -31,9 +32,23 @@ public class SevenEightGameKind implements GameKind {
   }
 
   @Override
-  public void onSeatsReady(UUID roomId, List<UUID> playerIdsInSeatOrder) {
+  public void onSeatsReady(UUID roomId, List<RoomSeat> seats) {
     sevenEightGameManager.initGame(
-        roomId, playerIdsInSeatOrder.stream().map(UUID::toString).toArray(String[]::new));
+        roomId,
+        seats.stream().map(seat -> seat.playerId().toString()).toArray(String[]::new),
+        seats.stream().map(SevenEightGameKind::seatHandle).toArray(String[]::new));
+  }
+
+  private static String seatHandle(RoomSeat seat) {
+    if (seat.handle() != null && !seat.handle().isBlank()) {
+      return seat.handle();
+    }
+    return seat.displayName();
+  }
+
+  @Override
+  public void publishState(UUID roomId) {
+    sevenEightGameManager.publishGameState(roomId);
   }
 
   @Override

@@ -44,13 +44,16 @@ spring:
 management:
   otlp:
     tracing:
+      export:
+        enabled: ${OTLP_TRACING_EXPORT_ENABLED:false}
       endpoint: http://localhost:4318/v1/traces
     metrics:
       export:
+        enabled: false
         url: http://localhost:4318/v1/metrics
   tracing:
     sampling:
-      probability: 0.6
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
   observations:
     annotations:
       enabled: false

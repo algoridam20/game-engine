@@ -1,5 +1,7 @@
 package com.algoridam.games.service.config;
 
+import com.algoridam.games.service.debug.StompTrafficInterceptor;
+import com.algoridam.games.service.debug.StompTrafficLog;
 import com.algoridam.games.service.security.StompAuthChannelInterceptor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -22,6 +24,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   private final ObjectMapper objectMapper;
   private final StompAuthChannelInterceptor stompAuthChannelInterceptor;
+  private final StompTrafficLog stompTrafficLog;
 
   @Override
   public void configureMessageBroker(MessageBrokerRegistry config) {
@@ -32,15 +35,23 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   @Override
   public void registerStompEndpoints(StompEndpointRegistry registry) {
+    registry.addEndpoint("/ws").setAllowedOriginPatterns("*");
     registry
         .addEndpoint("/ws")
-        .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*")
-        .withSockJS();
+        .setAllowedOriginPatterns("*")
+        .withSockJS()
+        .setSessionCookieNeeded(false);
   }
 
   @Override
   public void configureClientInboundChannel(ChannelRegistration registration) {
-    registration.interceptors(stompAuthChannelInterceptor);
+    registration.interceptors(
+        new StompTrafficInterceptor(stompTrafficLog, "IN"), stompAuthChannelInterceptor);
+  }
+
+  @Override
+  public void configureClientOutboundChannel(ChannelRegistration registration) {
+    registration.interceptors(new StompTrafficInterceptor(stompTrafficLog, "OUT"));
   }
 
   @Override

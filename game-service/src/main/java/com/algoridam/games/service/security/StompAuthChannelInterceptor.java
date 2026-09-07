@@ -29,9 +29,15 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     if (accessor == null || !StompCommand.CONNECT.equals(accessor.getCommand())) {
       return message;
     }
-    PlayerJwtInfo jwt = validateGameScopedJwt(bearerToken(accessor));
-    accessor.setUser(new StompPlayerPrincipal(jwt));
-    return message;
+    try {
+      PlayerJwtInfo jwt = validateGameScopedJwt(bearerToken(accessor));
+      accessor.setUser(new StompPlayerPrincipal(jwt));
+      log.info("STOMP CONNECT player={} game={}", jwt.playerId(), jwt.gameId());
+      return message;
+    } catch (ServiceException exception) {
+      log.warn("STOMP CONNECT rejected: {}", exception.getMessage());
+      throw exception;
+    }
   }
 
   private String bearerToken(StompHeaderAccessor accessor) {
@@ -39,21 +45,30 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     if (header == null) {
       header = accessor.getFirstNativeHeader("authorization");
     }
-    if (header == null || !header.startsWith("Bearer ")) {
-      throw new ServiceException(ErrorCode.UNAUTHORIZED);
+    if (header == null) {
+      header = accessor.getFirstNativeHeader("login");
     }
-    return header.substring("Bearer ".length());
+    if (header == null || header.isBlank()) {
+      log.warn("STOMP CONNECT missing Authorization header");
+      throw new ServiceException(ErrorCode.UNAUTHORIZED, "STOMP CONNECT missing Authorization");
+    }
+    if (header.startsWith("Bearer ")) {
+      return header.substring("Bearer ".length());
+    }
+    return header;
   }
 
   private PlayerJwtInfo validateGameScopedJwt(String token) {
     try {
       PlayerJwtInfo jwt = playerJwtValidator.validate(token);
       if (jwt.gameId() == null) {
+        log.warn("STOMP CONNECT used a session JWT without gameId for player={}", jwt.playerId());
         throw new ServiceException(ErrorCode.UNAUTHORIZED, "Game-scoped JWT is required");
       }
       return jwt;
     } catch (InvalidPlayerJwtException exception) {
-      throw new ServiceException(ErrorCode.UNAUTHORIZED);
+      log.warn("STOMP CONNECT JWT invalid: {}", exception.getMessage());
+      throw new ServiceException(ErrorCode.UNAUTHORIZED, "STOMP CONNECT JWT is invalid");
     }
   }
 }

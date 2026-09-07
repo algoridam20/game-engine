@@ -41,6 +41,12 @@ public class GameRoom {
     }
   }
 
+  public List<RoomSeat> seatsInOrder() {
+    synchronized (seats) {
+      return List.copyOf(seats);
+    }
+  }
+
   public List<UUID> playerIdsInSeatOrder() {
     synchronized (seats) {
       return seats.stream().map(RoomSeat::playerId).toList();

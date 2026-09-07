@@ -42,7 +42,7 @@ public class GameRoomManager {
     GameKind kind = gameKindRegistry.require(gameType);
     UUID roomId = UuidV7Generator.next();
     GameRoom room = new GameRoom(roomId, gameType);
-    room.getSeats().add(new RoomSeat(jwt.playerId(), jwt.displayName()));
+    room.getSeats().add(new RoomSeat(jwt.playerId(), jwt.handle(), jwt.displayName()));
     rooms.put(roomId, room);
     log.info("Created room {} for player {}", roomId, jwt.playerId());
     return issueToken(room, jwt);
@@ -57,7 +57,7 @@ public class GameRoomManager {
         if (room.getSeats().size() >= kind.maxPlayers()) {
           throw new ServiceException(ErrorCode.ROOM_FULL);
         }
-        room.getSeats().add(new RoomSeat(jwt.playerId(), jwt.displayName()));
+        room.getSeats().add(new RoomSeat(jwt.playerId(), jwt.handle(), jwt.displayName()));
       }
     }
     return issueToken(room, jwt);
@@ -76,7 +76,11 @@ public class GameRoomManager {
     GameKind kind = gameKindRegistry.require(room.getGameType());
     if (room.getSeats().size() >= kind.minPlayers()
         && room.getStarted().compareAndSet(false, true)) {
-      kind.onSeatsReady(roomId, room.playerIdsInSeatOrder());
+      log.info("Starting {} in room {}", room.getGameType(), roomId);
+      kind.onSeatsReady(roomId, room.seatsInOrder());
+    } else if (room.getStarted().get()) {
+      log.info("Republishing {} state for room {}", room.getGameType(), roomId);
+      kind.publishState(roomId);
     }
   }
 

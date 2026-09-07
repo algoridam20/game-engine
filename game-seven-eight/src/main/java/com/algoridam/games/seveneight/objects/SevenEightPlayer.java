@@ -23,6 +23,7 @@ public class SevenEightPlayer {
   @Setter private SevenEightCard[] openCards;
   @Setter private SevenEightCard[] closedCards;
 
+  @Setter private String handle;
   @Setter private List<Hand> winningHands;
   @Setter private boolean winner;
 
