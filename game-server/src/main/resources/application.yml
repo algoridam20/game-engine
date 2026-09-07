@@ -79,7 +79,7 @@ game:
     passkey:
       rp-id: ${PASSKEY_RP_ID:localhost}
       rp-name: ${PASSKEY_RP_NAME:Game Engine}
-      origin: ${PASSKEY_ORIGIN:http://localhost:8080}
+      origin: ${PASSKEY_ORIGIN:http://localhost:3000}
     jwt:
       issuer: ${JWT_ISSUER:game-engine}
       ttl: ${JWT_TTL:P90D}

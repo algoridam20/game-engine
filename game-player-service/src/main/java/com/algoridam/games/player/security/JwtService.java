@@ -2,6 +2,7 @@ package com.algoridam.games.player.security;
 
 import com.algoridam.games.common.auth.InvalidPlayerJwtException;
 import com.algoridam.games.common.auth.PlayerJwtInfo;
+import com.algoridam.games.common.auth.PlayerJwtIssuer;
 import com.algoridam.games.common.auth.PlayerJwtValidator;
 import com.algoridam.games.player.config.AuthProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -18,7 +19,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class JwtService implements PlayerJwtValidator {
+public class JwtService implements PlayerJwtValidator, PlayerJwtIssuer {
 
   private static final String ALGORITHM = "HS256";
   private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();

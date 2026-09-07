@@ -26,6 +26,10 @@
         </dependency>
         <dependency>
             <groupId>com.algoridam.games</groupId>
+            <artifactId>game-seven-eight</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.algoridam.games</groupId>
             <artifactId>game-road-not-taken</artifactId>
         </dependency>
         <dependency>
