@@ -39,4 +39,10 @@ public class GameRoomRealtimeController {
     PlayerJwtInfo jwt = StompAuth.requireGameJwt(headerAccessor);
     gameRoomManager.sendMessage(chatMessage.getMessage(), jwt);
   }
+
+  @MessageMapping("/chat/abandon")
+  public void abandon(final SimpMessageHeaderAccessor headerAccessor) {
+    PlayerJwtInfo jwt = StompAuth.requireGameJwt(headerAccessor);
+    gameRoomManager.abandonRoom(jwt);
+  }
 }

@@ -19,6 +19,7 @@ import com.algoridam.games.service.game.GameKindRegistry;
 import com.algoridam.games.service.model.ChatMessage;
 import com.algoridam.games.service.model.GameRoom;
 import com.algoridam.games.service.model.RoomSeat;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +51,14 @@ public class GameRoomManager {
 
   public RoomSessionResponse joinRoom(JoinRoomRequest request) {
     PlayerJwtInfo jwt = require();
-    GameRoom room = getRoom(request.roomId());
+    UUID roomId = request.roomId();
+    if (jwt.gameId() != null && !jwt.gameId().equals(roomId)) {
+      throw new ServiceException(ErrorCode.BAD_REQUEST, "JWT gameId does not match room");
+    }
+    if (jwt.gameId() != null && hasPlayer(roomId, jwt.playerId())) {
+      return issueToken(getRoom(roomId), jwt);
+    }
+    GameRoom room = getRoom(roomId);
     GameKind kind = gameKindRegistry.require(room.getGameType());
     synchronized (room.getSeats()) {
       if (!room.hasPlayer(jwt.playerId())) {
@@ -95,7 +103,15 @@ public class GameRoomManager {
     messageTemplate.convertAndSend("/topic/room/" + jwt.gameId(), chatMessage);
   }
 
+  public void abandonRoom(PlayerJwtInfo jwt) {
+    exitRoom(jwt.playerId(), jwt.gameId(), "Abandoned");
+  }
+
   public void exitRoom(UUID playerId, UUID roomId) {
+    exitRoom(playerId, roomId, "Left");
+  }
+
+  private void exitRoom(UUID playerId, UUID roomId, String leaveMessage) {
     GameRoom room = rooms.get(roomId);
     if (room == null) {
       return;
@@ -109,17 +125,21 @@ public class GameRoomManager {
       room.getSeats().removeIf(existing -> existing.playerId().equals(playerId));
     }
     kind.onPlayerLeft(roomId, playerId);
+    ChatMessage left = createChatMessage(seat.displayName(), leaveMessage, LEAVE);
+    messageTemplate.convertAndSend("/topic/room/" + roomId, left);
     if (room.getSeats().isEmpty()) {
       rooms.remove(roomId);
       kind.destroy(roomId);
       log.info("Room {} destroyed", roomId);
     }
-    ChatMessage left = createChatMessage(seat.displayName(), "Left", LEAVE);
-    messageTemplate.convertAndSend("/topic/room/" + roomId, left);
   }
 
   GameRoom getRoomForTests(UUID roomId) {
     return rooms.get(roomId);
+  }
+
+  public List<GameRoom> listActiveRooms() {
+    return List.copyOf(rooms.values());
   }
 
   private RoomSessionResponse issueToken(GameRoom room, PlayerJwtInfo jwt) {
@@ -134,6 +154,11 @@ public class GameRoomManager {
       throw new ServiceException(ErrorCode.DATA_NOT_FOUND, "Room not found: " + roomId);
     }
     return room;
+  }
+
+  private boolean hasPlayer(UUID roomId, UUID playerId) {
+    GameRoom room = rooms.get(roomId);
+    return room != null && room.hasPlayer(playerId);
   }
 
   private String resolveGameType(CreateRoomRequest request) {

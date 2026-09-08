@@ -6,12 +6,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
@@ -26,6 +29,9 @@ import org.springframework.stereotype.Component;
 public class StompTrafficLog {
 
   public static final int MAX_EVENTS = 500;
+  private static final Pattern ROOM_ID =
+      Pattern.compile(
+          "/topic/room/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
 
   public record Capture(
       Instant at,
@@ -95,6 +101,45 @@ public class StompTrafficLog {
       }
     }
     return destinations;
+  }
+
+  public Map<String, RoomTraffic> trafficByRoom() {
+    Map<String, RoomTraffic> byRoom = new LinkedHashMap<>();
+    for (Capture capture : events) {
+      String roomId = roomIdFrom(capture.destination());
+      if (roomId == null) {
+        continue;
+      }
+      RoomTraffic traffic = byRoom.computeIfAbsent(roomId, RoomTraffic::new);
+      if (!capture.destination().isBlank()) {
+        traffic.topics.add(capture.destination());
+      }
+      if ("IN".equals(capture.direction())) {
+        traffic.received++;
+      } else {
+        traffic.published++;
+      }
+    }
+    return byRoom;
+  }
+
+  public static String roomIdFrom(String destination) {
+    if (destination == null || destination.isBlank()) {
+      return null;
+    }
+    Matcher matcher = ROOM_ID.matcher(destination);
+    return matcher.find() ? matcher.group(1) : null;
+  }
+
+  public static final class RoomTraffic {
+    public final String roomId;
+    public final Set<String> topics = new LinkedHashSet<>();
+    public int published;
+    public int received;
+
+    private RoomTraffic(String roomId) {
+      this.roomId = roomId;
+    }
   }
 
   public void clear() {

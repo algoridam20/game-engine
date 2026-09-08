@@ -20,11 +20,16 @@
     </nav>
     <h1>STOMP inspector</h1>
     <p class="warning">
-      Captures inbound CONNECT/SUBSCRIBE/SEND, outbound MESSAGE, and the full game snapshot
-      each time it is published (last 500 frames). Keep this open while the Next.js app plays
-      on port 3000.
+      Active rooms, topics, and pub/recv counts, plus captured frames (last 500).
+      Keep this open while the Next.js app plays on port 3000.
     </p>
     <div class="toolbar">
+      <label>
+        Room
+        <select id="room-filter">
+          <option value="">All rooms</option>
+        </select>
+      </label>
       <label>
         Channel
         <select id="channel-filter">
@@ -35,9 +40,9 @@
         Direction
         <select id="direction-filter">
           <option value="">IN + OUT + PUBLISH</option>
-          <option value="IN">IN (client → server)</option>
-          <option value="OUT">OUT (server → client)</option>
-          <option value="PUBLISH">PUBLISH (game snapshot)</option>
+          <option value="IN">IN (received)</option>
+          <option value="OUT">OUT (to clients)</option>
+          <option value="PUBLISH">PUBLISH (snapshot)</option>
         </select>
       </label>
       <label>
@@ -48,13 +53,17 @@
       <button id="clear" type="button">Clear</button>
       <span id="status" class="meta"></span>
     </div>
+    <section class="panel rooms-panel">
+      <div class="meta">Active rooms</div>
+      <div id="rooms">No rooms yet.</div>
+    </section>
     <section class="panel snapshots">
       <div class="meta">Latest published snapshots</div>
       <div id="snapshots">No snapshots yet. Play or wait for a game-state publish.</div>
     </section>
     <div class="stomp-layout">
       <aside class="panel channels">
-        <div class="meta">Channels seen</div>
+        <div class="meta">Topics / channels</div>
         <div id="channel-list"></div>
       </aside>
       <section class="panel">
@@ -64,6 +73,7 @@
     </div>
   </div>
   <script>
+    const roomFilter = document.getElementById("room-filter");
     const channelFilter = document.getElementById("channel-filter");
     const directionFilter = document.getElementById("direction-filter");
     const live = document.getElementById("live");
@@ -72,7 +82,9 @@
     const eventsEl = document.getElementById("events");
     const channelList = document.getElementById("channel-list");
     const snapshotsEl = document.getElementById("snapshots");
+    const roomsEl = document.getElementById("rooms");
     let selectedChannel = "";
+    let selectedRoom = "";
     let timer = null;
 
     function pretty(payload) {
@@ -84,8 +96,93 @@
       }
     }
 
+    function roomIdFrom(destination) {
+      const match = /\/topic\/room\/([0-9a-fA-F-]{36})/.exec(destination || "");
+      return match ? match[1] : "";
+    }
+
+    function shortId(value) {
+      return value && value.length > 12 ? value.slice(0, 8) + "…" : value || "";
+    }
+
     function render(data) {
-      const channels = data.channels || [];
+      const rooms = data.rooms || [];
+      const currentRoom = roomFilter.value || selectedRoom;
+      roomFilter.innerHTML = '<option value="">All rooms</option>';
+      rooms.forEach((room) => {
+        const option = document.createElement("option");
+        option.value = room.roomId;
+        option.textContent =
+          (room.active ? "" : "(ended) ") +
+          shortId(room.roomId) +
+          " · pub " +
+          room.published +
+          " / recv " +
+          room.received;
+        roomFilter.appendChild(option);
+      });
+      if (rooms.some((room) => room.roomId === currentRoom)) {
+        roomFilter.value = currentRoom;
+        selectedRoom = currentRoom;
+      } else {
+        selectedRoom = "";
+      }
+
+      roomsEl.innerHTML =
+        rooms.length === 0
+          ? "No rooms yet."
+          : rooms
+              .map((room) => {
+                const active = selectedRoom === room.roomId ? " active" : "";
+                const topics = (room.topics || [])
+                  .map((topic) => "<li><code>" + escapeHtml(topic) + "</code></li>")
+                  .join("");
+                const players = (room.players || []).join(", ") || "—";
+                return (
+                  '<article class="room-card' +
+                  active +
+                  '" data-room="' +
+                  room.roomId +
+                  '">' +
+                  "<header>" +
+                  "<strong>" +
+                  (room.active ? "LIVE" : "ENDED") +
+                  "</strong>" +
+                  "<span>" +
+                  escapeHtml(room.gameType || "—") +
+                  "</span>" +
+                  '<span class="meta">' +
+                  shortId(room.roomId) +
+                  "</span>" +
+                  "</header>" +
+                  '<p class="meta">Players: ' +
+                  escapeHtml(players) +
+                  "</p>" +
+                  '<p class="meta">Published ' +
+                  room.published +
+                  " · Received " +
+                  room.received +
+                  "</p>" +
+                  "<ul>" +
+                  topics +
+                  "</ul>" +
+                  "</article>"
+                );
+              })
+              .join("");
+      roomsEl.querySelectorAll("[data-room]").forEach((card) => {
+        card.onclick = () => {
+          selectedRoom = card.getAttribute("data-room") === selectedRoom ? "" : card.getAttribute("data-room");
+          selectedChannel = "";
+          roomFilter.value = selectedRoom;
+          render(data);
+        };
+      });
+
+      const room = roomFilter.value || selectedRoom;
+      const channels = (data.channels || []).filter((channel) => {
+        return !room || roomIdFrom(channel) === room;
+      });
       const current = channelFilter.value;
       channelFilter.innerHTML = '<option value="">All channels</option>';
       channels.forEach((channel) => {
@@ -96,6 +193,8 @@
       });
       if (channels.includes(current)) {
         channelFilter.value = current;
+      } else {
+        selectedChannel = "";
       }
       channelList.innerHTML = "";
       const allBtn = document.createElement("button");
@@ -122,6 +221,7 @@
       const direction = directionFilter.value;
       const channel = channelFilter.value || selectedChannel;
       const snapshots = (data.snapshots || []).filter((event) => {
+        if (room && roomIdFrom(event.destination) !== room) return false;
         if (channel && event.destination !== channel) return false;
         return true;
       });
@@ -149,6 +249,7 @@
               .join("");
 
       const events = (data.events || []).filter((event) => {
+        if (room && roomIdFrom(event.destination) !== room) return false;
         if (channel && event.destination !== channel) return false;
         if (direction && event.direction !== direction) return false;
         return true;
@@ -156,6 +257,7 @@
       count.textContent =
         events.length +
         " frame(s)" +
+        (room ? " in room " + shortId(room) : "") +
         (channel ? " on " + channel : "") +
         " · " +
         (data.events || []).length +
@@ -191,7 +293,7 @@
     }
 
     function escapeHtml(value) {
-      return value
+      return String(value || "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;");
@@ -214,7 +316,13 @@
     document.getElementById("clear").onclick = async () => {
       await fetch("/api/v1/debug/stomp", { method: "DELETE" });
       selectedChannel = "";
+      selectedRoom = "";
       await refresh();
+    };
+    roomFilter.onchange = () => {
+      selectedRoom = roomFilter.value;
+      selectedChannel = "";
+      refresh();
     };
     channelFilter.onchange = () => {
       selectedChannel = channelFilter.value;

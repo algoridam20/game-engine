@@ -266,7 +266,28 @@ button:hover { border-color: var(--accent); }
   border: 0;
   margin: 0;
 }
-.panel.snapshots { min-height: 0; margin-bottom: 16px; max-height: 40vh; overflow: auto; }
+.panel.snapshots, .panel.rooms-panel { min-height: 0; margin-bottom: 16px; max-height: 40vh; overflow: auto; }
+.rooms-panel { display: grid; gap: 8px; }
+#rooms { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.room-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.room-card:hover, .room-card.active { border-color: var(--accent); }
+.room-card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+}
+.room-card ul { margin: 6px 0 0; padding-left: 1.1rem; font-size: 12px; }
+.room-card li { margin: 2px 0; word-break: break-all; }
 .dir-IN { color: var(--in); }
 .dir-OUT { color: var(--out); }
 .dir-PUBLISH { color: var(--accent); }

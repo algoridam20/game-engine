@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +20,8 @@ import com.algoridam.games.service.dto.RoomDtos.JoinRoomRequest;
 import com.algoridam.games.service.dto.RoomDtos.RoomSessionResponse;
 import com.algoridam.games.service.game.GameKind;
 import com.algoridam.games.service.game.GameKindRegistry;
+import com.algoridam.games.service.model.ChatMessage;
+import com.algoridam.games.service.model.MessageType;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
@@ -116,6 +120,53 @@ class GameRoomManagerTest {
             ServiceException.class,
             () -> gameRoomManager.joinRoom(new JoinRoomRequest(created.roomId())));
     assertEquals(ErrorCode.ROOM_FULL, exception.getErrorCode());
+  }
+
+  @Test
+  void joinRoom_matchingGameJwt_reissuesWithoutAddingSeat() {
+    UUID playerId = UUID.randomUUID();
+    authenticate(playerId, null);
+    RoomSessionResponse created = gameRoomManager.createRoom(null);
+
+    authenticate(playerId, created.roomId());
+    RoomSessionResponse joined = gameRoomManager.joinRoom(new JoinRoomRequest(created.roomId()));
+
+    assertEquals(created.roomId(), joined.roomId());
+    assertEquals(1, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
+    verify(playerJwtIssuer, times(2))
+        .generate(eq(playerId), eq(HANDLE), eq(DISPLAY_NAME), eq(created.roomId()));
+  }
+
+  @Test
+  void joinRoom_gameJwtForDifferentRoom_isRejected() {
+    UUID playerId = UUID.randomUUID();
+    authenticate(playerId, null);
+    RoomSessionResponse created = gameRoomManager.createRoom(null);
+
+    authenticate(playerId, created.roomId());
+    ServiceException exception =
+        assertThrows(
+            ServiceException.class,
+            () -> gameRoomManager.joinRoom(new JoinRoomRequest(UUID.randomUUID())));
+    assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+  }
+
+  @Test
+  void abandonRoom_publishesAbandonedToEveryoneInRoom() {
+    UUID creator = UUID.randomUUID();
+    UUID joiner = UUID.randomUUID();
+    authenticate(creator, null);
+    RoomSessionResponse created = gameRoomManager.createRoom(null);
+    authenticate(joiner, null);
+    gameRoomManager.joinRoom(new JoinRoomRequest(created.roomId()));
+
+    gameRoomManager.abandonRoom(jwt(joiner, created.roomId()));
+
+    ArgumentCaptor<ChatMessage> captor = ArgumentCaptor.forClass(ChatMessage.class);
+    verify(messageTemplate).convertAndSend(eq("/topic/room/" + created.roomId()), captor.capture());
+    assertEquals("Abandoned", captor.getValue().getMessage());
+    assertEquals(MessageType.LEAVE, captor.getValue().getType());
+    assertEquals(1, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
   }
 
   @Test
