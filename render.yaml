@@ -30,8 +30,8 @@ services:
       - key: OTLP_TRACING_EXPORT_ENABLED
         value: "false"
       - key: PASSKEY_RP_ID
-        value: game-experiment.onrender.com
+        value: game-experiment-app.onrender.com
       - key: PASSKEY_ORIGIN
-        value: https://game-experiment.onrender.com
+        value: https://game-experiment-app.onrender.com
       - key: JWT_SECRET_V1
         generateValue: true
