@@ -21,11 +21,18 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
   private static final String[] PUBLIC_PATHS = {
+    "/dev",
+    "/dev/**",
     "/passkey-test.html",
+    "/stomp-inspector.html",
     "/api/v1/auth/passkeys/signup/**",
     "/api/v1/auth/passkeys/login/**",
+    "/api/v1/debug/stomp",
+    "/api/v1/debug/stomp/**",
     "/api/v1/health",
     "/actuator/health",
+    "/ws",
+    "/ws/**",
     "/api-docs/**",
     "/swagger-ui/**",
     "/swagger-ui.html"

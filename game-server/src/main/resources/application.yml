@@ -44,13 +44,16 @@ spring:
 management:
   otlp:
     tracing:
+      export:
+        enabled: ${OTLP_TRACING_EXPORT_ENABLED:false}
       endpoint: http://localhost:4318/v1/traces
     metrics:
       export:
+        enabled: false
         url: http://localhost:4318/v1/metrics
   tracing:
     sampling:
-      probability: 0.6
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
   observations:
     annotations:
       enabled: false
@@ -79,7 +82,7 @@ game:
     passkey:
       rp-id: ${PASSKEY_RP_ID:localhost}
       rp-name: ${PASSKEY_RP_NAME:Game Engine}
-      origin: ${PASSKEY_ORIGIN:http://localhost:8080}
+      origin: ${PASSKEY_ORIGIN:http://localhost:3000}
     jwt:
       issuer: ${JWT_ISSUER:game-engine}
       ttl: ${JWT_TTL:P90D}

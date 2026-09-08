@@ -3,83 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Game Engine Passkey Test</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        font-family: system-ui, sans-serif;
-      }
-      body {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 24px;
-      }
-      main {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 16px;
-      }
-      section {
-        border: 1px solid #8886;
-        border-radius: 10px;
-        padding: 16px;
-      }
-      label {
-        display: block;
-        margin: 10px 0;
-      }
-      input {
-        box-sizing: border-box;
-        display: block;
-        margin-top: 4px;
-        padding: 8px;
-        width: 100%;
-      }
-      button {
-        cursor: pointer;
-        margin: 4px 4px 4px 0;
-        padding: 8px 12px;
-      }
-      pre {
-        background: #7772;
-        border-radius: 6px;
-        max-height: 360px;
-        overflow: auto;
-        padding: 12px;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .wide {
-        grid-column: 1 / -1;
-      }
-      .warning {
-        color: #d88b00;
-      }
-      #status[data-error="true"] {
-        color: #d33;
-      }
-      #page-error {
-        background: #d332;
-        border: 1px solid #d33;
-        border-radius: 8px;
-        padding: 12px 16px;
-      }
-      #page-error a {
-        color: inherit;
-      }
-    </style>
+    <title>Passkeys — Game Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/dev/style.css" />
   </head>
   <body>
-    <h1>Game Engine Passkey Test</h1>
+    <div class="wrap-wide">
+    <nav class="top">
+      <a class="brand" href="/dev/">Game Engine</a>
+      <a href="/dev/architecture.html">Architecture</a>
+      <a href="/dev/passkeys.html" aria-current="page">Passkeys</a>
+      <a href="/dev/stomp.html">STOMP</a>
+      <a href="/swagger-ui.html">OpenAPI</a>
+    </nav>
+    <h1>Passkeys</h1>
     <p class="warning">
-      Development helper only. WebAuthn requires localhost or HTTPS. The JWT is
+      Development helper. WebAuthn requires localhost or HTTPS. The JWT is
       stored in this tab's session storage.
     </p>
     <div id="page-error" hidden></div>
     <p id="support"></p>
     <p id="status"></p>
 
-    <main>
+    <main class="tools">
       <section class="wide">
         <h2>Server</h2>
         <label>
@@ -92,8 +40,8 @@
         </label>
         <p>
           Open this page at
-          <a id="served-url" href="http://localhost:8080/passkey-test.html"
-            >http://localhost:8080/passkey-test.html</a
+          <a id="served-url" href="http://localhost:8080/dev/passkeys.html"
+            >http://localhost:8080/dev/passkeys.html</a
           >
           after starting the app. Do not open the HTML file directly from disk.
         </p>
@@ -178,7 +126,7 @@
       }
 
       function initializePageContext() {
-        const servedUrl = `${DEFAULT_API_BASE}/passkey-test.html`;
+        const servedUrl = `${DEFAULT_API_BASE}/dev/passkeys.html`;
         $("served-url").href = servedUrl;
         $("served-url").textContent = servedUrl;
 
@@ -303,7 +251,7 @@
           response = await fetch(url, { ...options, headers });
         } catch (error) {
           throw new Error(
-            `Could not reach ${url}. Start the server with "mvn spring-boot:run -pl game-server" and open ${DEFAULT_API_BASE}/passkey-test.html instead of the file on disk.`,
+            `Could not reach ${url}. Start the server with "mvn spring-boot:run -pl game-server" and open ${DEFAULT_API_BASE}/dev/passkeys.html instead of the file on disk.`,
           );
         }
         const body = await response.json().catch(() => null);
@@ -507,5 +455,6 @@
       initializePageContext();
       renderJwt();
     </script>
+    </div>
   </body>
 </html>

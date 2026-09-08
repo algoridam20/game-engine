@@ -11,6 +11,7 @@
         <module>game-server</module>
         <module>game-road-not-taken</module>
         <module>game-service</module>
+        <module>game-seven-eight</module>
         <module>game-leaderboard-service</module>
     </modules>
 
@@ -60,6 +61,11 @@
             <dependency>
                 <groupId>com.algoridam.games</groupId>
                 <artifactId>game-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.algoridam.games</groupId>
+                <artifactId>game-seven-eight</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -22,7 +22,7 @@ public class SpringSecurityCurrentPlayerProvider {
         .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHORIZED));
   }
 
-  private PlayerJwtInfo requireJwtInfo() {
+  public PlayerJwtInfo requireJwtInfo() {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null) {
       throw new ServiceException(ErrorCode.UNAUTHORIZED);

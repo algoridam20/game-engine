@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture — Game Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="./">Game Engine Docs</a>
+      <a href="architecture.html" aria-current="page">Architecture</a>
+      <a href="game-player-service/">Player service</a>
+    </nav>
+
+    <h1>Architecture</h1>
+    <p class="muted">Two processes: Spring Boot <code>game-server</code> on <code>:8080</code> and Next.js <code>game-experiment-app</code> on <code>:3000</code>. Live tools (same content, plus Passkeys and STOMP) are at <a href="http://localhost:8080/dev/">http://localhost:8080/dev/</a>.</p>
+
+    <h2>Runtime</h2>
+    <pre class="mermaid">
+flowchart LR
+  browser["Browser localhost:3000"]
+  app["game-experiment-app Next.js"]
+  api["game-server :8080"]
+  mysql[(MySQL game_db)]
+  browser --> app
+  app -->|"REST + SockJS/STOMP"| api
+  api --> mysql
+    </pre>
+
+    <h2>Backend modules</h2>
+    <p><code>game-server</code> is the runnable Spring Boot app. It depends on the libraries below and component-scans <code>com.algoridam.games</code>.</p>
+    <table>
+      <thead>
+        <tr><th>Module</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>game-commons</code></td><td>Shared JWT types, error envelope, <code>ErrorCode</code>, <code>ServiceException</code></td></tr>
+        <tr><td><code>game-player-service</code></td><td>Passkeys, players, session JWT, Spring Security, CORS</td></tr>
+        <tr><td><code>game-service</code></td><td>Rooms, seats, chat, SockJS/STOMP, <code>GameKind</code> SPI, STOMP probe</td></tr>
+        <tr><td><code>game-seven-eight</code></td><td>7-8 rules plugin: <code>GameKind</code> + <code>/app/v1/game/7_8/...</code></td></tr>
+        <tr><td><code>game-road-not-taken</code></td><td>Empty plugin slot for a later game</td></tr>
+        <tr><td><code>game-leaderboard-service</code></td><td>Placeholder leaderboard library</td></tr>
+        <tr><td><code>game-server</code></td><td>Boot jar, <code>application.yml</code>, static <code>/dev</code> pages</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Frontend modules</h2>
+    <p>Repo: <code>game-experiment-app</code>. Next.js App Router, Zustand, SockJS + stompjs.</p>
+    <table>
+      <thead>
+        <tr><th>Area</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>src/app/join</code></td><td>Passkey signup/login, then create/join room</td></tr>
+        <tr><td><code>src/app/game/[gameId]</code></td><td>Board + chat for one room UUID</td></tr>
+        <tr><td><code>src/state/AuthStore.js</code></td><td>Persists session JWT and game JWT</td></tr>
+        <tr><td><code>src/state/GameState.js</code></td><td>Combines chat + 7-8 slices; owns STOMP session</td></tr>
+        <tr><td><code>src/api/rest</code></td><td>Passkeys and <code>/api/v1/room/*/init</code></td></tr>
+        <tr><td><code>src/api/realtime/stompClient.js</code></td><td>CONNECT with game JWT, subscribe, send actions</td></tr>
+        <tr><td><code>src/components/join-game</code></td><td>Lobby forms; re-auth with passkey before create/join</td></tr>
+        <tr><td><code>src/components/game</code></td><td>Board: hand, table, trick, state/score cards</td></tr>
+        <tr><td><code>src/components/chat</code></td><td>Room chat plus Abandon</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Identity</h2>
+    <p>There is no <code>userId</code> in the JWT. Player id is <code>sub</code>. After create/join, <code>gameId</code> is the room UUID. Chat and play use that game JWT; REST join is the only step that still sends <code>roomId</code> in the body (session JWT has no room yet).</p>
+    <pre class="mermaid">
+sequenceDiagram
+  participant UI as Next.js
+  participant API as game-server
+  UI->>API: passkey login (session JWT, no gameId)
+  UI->>API: POST /api/v1/room/create/init or join/init
+  API-->>UI: roomId + game JWT (sub + gameId)
+  UI->>API: STOMP CONNECT Bearer game JWT
+  UI->>API: SEND /app/v1/chat/join
+  API-->>UI: /topic/room/{id} and /topic/room/{id}/player/{sub}
+    </pre>
+
+    <h2>STOMP map</h2>
+    <table>
+      <thead>
+        <tr><th>Direction</th><th>Destination</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Client SEND</td><td><code>/app/v1/chat/join</code></td><td>Seat realtime; start or republish game</td></tr>
+        <tr><td>Client SEND</td><td><code>/app/v1/chat/send_message</code></td><td>Chat text</td></tr>
+        <tr><td>Client SEND</td><td><code>/app/v1/game/7_8/action/*</code></td><td>Trump, play, next round, publish</td></tr>
+        <tr><td>Server MESSAGE</td><td><code>/topic/room/{roomId}</code></td><td>Join / leave / chat</td></tr>
+        <tr><td>Server MESSAGE</td><td><code>/topic/room/{roomId}/player/{playerId}</code></td><td>Fogged 7-8 state</td></tr>
+      </tbody>
+    </table>
+
+    <h2>REST (player + rooms)</h2>
+    <table>
+      <thead>
+        <tr><th>Path</th><th>Auth</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>/api/v1/auth/passkeys/signup|login/*</code></td><td>Public</td></tr>
+        <tr><td><code>/api/v1/player/**</code></td><td>Session JWT</td></tr>
+        <tr><td><code>/api/v1/room/create/init</code></td><td>Session JWT</td></tr>
+        <tr><td><code>/api/v1/room/join/init</code></td><td>Session JWT; body <code>{ roomId }</code></td></tr>
+        <tr><td><code>/ws</code></td><td>HTTP public; STOMP CONNECT needs game JWT</td></tr>
+      </tbody>
+    </table>
+
+    <footer class="note">Local live pages: <a href="http://localhost:8080/dev/">http://localhost:8080/dev/</a>.</footer>
+  </div>
+</body>
+</html>

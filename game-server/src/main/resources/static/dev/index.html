@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Game Engine — local tools</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/dev/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="top">
+      <a class="brand" href="/dev/" aria-current="page">Game Engine</a>
+      <a href="/dev/architecture.html">Architecture</a>
+      <a href="/dev/passkeys.html">Passkeys</a>
+      <a href="/dev/stomp.html">STOMP</a>
+      <a href="/swagger-ui.html">OpenAPI</a>
+    </nav>
+
+    <h1>Local tools</h1>
+    <p class="muted">All of these are served by <code>game-server</code> on port <code>8080</code>. The Next.js app stays on <code>3000</code> and talks to this origin.</p>
+
+    <ul class="card-list">
+      <li>
+        <a href="/dev/architecture.html">
+          <strong>Architecture</strong>
+          <span>Backend modules, frontend modules, JWT flow, STOMP topics</span>
+        </a>
+      </li>
+      <li>
+        <a href="/dev/passkeys.html">
+          <strong>Passkeys</strong>
+          <span>Sign up, log in, list credentials, inspect JWT claims</span>
+        </a>
+      </li>
+      <li>
+        <a href="/dev/stomp.html">
+          <strong>STOMP inspector</strong>
+          <span>Capture IN/OUT frames on every channel while a game is running</span>
+        </a>
+      </li>
+      <li>
+        <a href="/swagger-ui.html">
+          <strong>OpenAPI</strong>
+          <span>REST contract at /swagger-ui.html and /api-docs</span>
+        </a>
+      </li>
+    </ul>
+
+    <footer class="note">Old URLs <code>/passkey-test.html</code> and <code>/stomp-inspector.html</code> redirect here.</footer>
+  </div>
+</body>
+</html>
