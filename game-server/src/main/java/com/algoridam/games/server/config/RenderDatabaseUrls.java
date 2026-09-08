@@ -2,6 +2,9 @@ package com.algoridam.games.server.config;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -14,6 +17,28 @@ final class RenderDatabaseUrls {
 
   private RenderDatabaseUrls() {}
 
+  static Optional<Map<String, Object>> springDatasourceProperties(String databaseUrl) {
+    if (databaseUrl == null || databaseUrl.isBlank()) {
+      return Optional.empty();
+    }
+    String trimmed = databaseUrl.trim();
+    Map<String, Object> properties = new LinkedHashMap<>();
+    if (trimmed.startsWith("jdbc:postgresql:")) {
+      properties.put("spring.datasource.url", withSslMode(trimmed));
+      properties.put("spring.datasource.driver-class-name", "org.postgresql.Driver");
+      return Optional.of(properties);
+    }
+    if (!trimmed.startsWith("postgres://") && !trimmed.startsWith("postgresql://")) {
+      return Optional.empty();
+    }
+    RenderDatabaseSettings settings = fromPostgresUrl(trimmed);
+    properties.put("spring.datasource.url", settings.url());
+    properties.put("spring.datasource.username", settings.username());
+    properties.put("spring.datasource.password", settings.password());
+    properties.put("spring.datasource.driver-class-name", "org.postgresql.Driver");
+    return Optional.of(properties);
+  }
+
   static RenderDatabaseSettings fromPostgresUrl(String databaseUrl) {
     Matcher matcher = POSTGRES.matcher(databaseUrl.trim());
     if (!matcher.matches()) {
@@ -24,14 +49,24 @@ final class RenderDatabaseUrls {
     String host = matcher.group(3);
     String port = matcher.group(4) == null ? "5432" : matcher.group(4);
     String database = matcher.group(5);
-    String query = matcher.group(6);
-    if (query == null || query.isBlank()) {
-      query = "?sslmode=require";
-    } else if (!query.contains("sslmode=")) {
-      query = query.contains("?") ? query + "&sslmode=require" : "?" + query + "&sslmode=require";
+    String query = withSslMode(matcher.group(6) == null ? "" : matcher.group(6));
+    if (!query.startsWith("?")) {
+      query = query.isBlank() ? "?sslmode=require" : "?" + query;
     }
     return new RenderDatabaseSettings(
         "jdbc:postgresql://" + host + ":" + port + "/" + database + query, username, password);
+  }
+
+  private static String withSslMode(String urlOrQuery) {
+    if (urlOrQuery.contains("sslmode=")) {
+      return urlOrQuery;
+    }
+    if (urlOrQuery.isBlank()) {
+      return "?sslmode=require";
+    }
+    return urlOrQuery.contains("?")
+        ? urlOrQuery + "&sslmode=require"
+        : urlOrQuery + "?sslmode=require";
   }
 
   private static String decode(String value) {
