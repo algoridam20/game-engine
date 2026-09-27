@@ -15,69 +15,64 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MechakuchaGoGameManager {
+
   private final ConcurrentHashMap<UUID, MechakuchaGoMatch> matches = new ConcurrentHashMap<>();
   private final SimpMessageSendingOperations messageTemplate;
   private final StompTrafficLog stompTrafficLog;
 
-  public void initGame(UUID roomId, String[] players, String[] handles) {
+  public void initGame(final UUID roomId, final String[] players, final String[] handles) {
     if (players.length != 2) {
       throw new ServiceException(ErrorCode.BAD_REQUEST);
     }
     if (matches.containsKey(roomId)) {
       return;
     }
-    matches.put(
-        roomId,
-        new MechakuchaGoMatch(
-            players[0],
-            players[1],
-            handleAt(handles, 0, players[0]),
-            handleAt(handles, 1, players[1])));
+    String blackHandle = handleAt(handles, 0, players[0]);
+    String whiteHandle = handleAt(handles, 1, players[1]);
+    matches.put(roomId, new MechakuchaGoMatch(players[0], players[1], blackHandle, whiteHandle));
     publishGameState(roomId);
   }
 
-  public void destroyGame(UUID roomId) {
+  public void destroyGame(final UUID roomId) {
     matches.remove(roomId);
   }
 
-  public void publishGameState(UUID roomId) {
+  public void publishGameState(final UUID roomId) {
     MechakuchaGoMatch match = matches.get(roomId);
     if (match == null) {
       log.info("Skipping game-state publish; room {} has not started", roomId);
       return;
     }
-    publish(roomId, match);
+    publishTo(roomId, match.viewFor(match.blackId()));
+    publishTo(roomId, match.viewFor(match.whiteId()));
   }
 
-  public void lockMove(UUID roomId, String playerId, LockMoveRequest request) {
-    MechakuchaGoMatch match = require(roomId);
-    match.lockMove(playerId, toMove(match, playerId, request));
-    publish(roomId, match);
+  public void performActionLockMove(
+      final UUID roomId, final String playerId, final LockMoveRequest request) {
+    MechakuchaGoMatch match = getMatch(roomId);
+    match.lockMove(playerId, moveFrom(match, playerId, request));
+    publishGameState(roomId);
   }
 
-  public void nextRound(UUID roomId) {
-    MechakuchaGoMatch match = require(roomId);
+  public void performActionInitNextRound(final UUID roomId) {
+    MechakuchaGoMatch match = getMatch(roomId);
     match.nextRound();
-    publish(roomId, match);
+    publishGameState(roomId);
   }
 
-  private void publish(UUID roomId, MechakuchaGoMatch match) {
-    send(roomId, match.viewFor(match.blackId()));
-    send(roomId, match.viewFor(match.whiteId()));
-  }
-
-  private void send(UUID roomId, PlayerView view) {
+  private void publishTo(UUID roomId, PlayerView view) {
     String destination = "/topic/room/" + roomId + "/player/" + view.playerId();
     stompTrafficLog.recordPublish(destination, view);
     messageTemplate.convertAndSend(destination, view);
   }
 
-  private MechakuchaGoMatch require(UUID roomId) {
+  private MechakuchaGoMatch getMatch(final UUID roomId) {
     MechakuchaGoMatch match = matches.get(roomId);
     if (match == null) {
       throw new ServiceException(ErrorCode.DATA_NOT_FOUND);
@@ -85,28 +80,28 @@ public class MechakuchaGoGameManager {
     return match;
   }
 
-  private static Move toMove(MechakuchaGoMatch match, String playerId, LockMoveRequest request) {
+  private static Move moveFrom(MechakuchaGoMatch match, String playerId, LockMoveRequest request) {
     if (request == null || Boolean.TRUE.equals(request.pass())) {
       return null;
     }
     if (request.direction() == null || request.index() == null || request.stop() == null) {
       throw new ServiceException(ErrorCode.BAD_REQUEST, "A move needs a direction, line, and stop");
     }
-    Direction direction;
-    try {
-      direction = Direction.valueOf(request.direction().trim().toUpperCase());
-    } catch (IllegalArgumentException exception) {
-      throw new ServiceException(ErrorCode.BAD_REQUEST, "Unknown direction");
-    }
+    Direction direction = directionFrom(request.direction());
     Color color = Color.valueOf(match.viewFor(playerId).color());
     return new Move(color, direction, request.index(), request.stop());
   }
 
+  private static Direction directionFrom(String direction) {
+    try {
+      return Direction.valueOf(direction.trim().toUpperCase());
+    } catch (IllegalArgumentException exception) {
+      throw new ServiceException(ErrorCode.BAD_REQUEST, "Unknown direction");
+    }
+  }
+
   private static String handleAt(String[] handles, int index, String fallback) {
-    if (handles != null
-        && handles.length > index
-        && handles[index] != null
-        && !handles[index].isBlank()) {
+    if (handles != null && handles.length > index && StringUtils.hasText(handles[index])) {
       return handles[index];
     }
     return fallback;

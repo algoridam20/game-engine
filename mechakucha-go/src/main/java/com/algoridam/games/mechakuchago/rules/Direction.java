@@ -1,5 +1,12 @@
 package com.algoridam.games.mechakuchago.rules;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.Accessors;
+
+@Getter
+@Accessors(fluent = true)
+@RequiredArgsConstructor
 public enum Direction {
   RIGHT(0, 1, Color.BLACK, true),
   LEFT(0, -1, Color.WHITE, true),
@@ -10,29 +17,6 @@ public enum Direction {
   private final int columnDelta;
   private final Color owner;
   private final boolean horizontal;
-
-  Direction(int rowDelta, int columnDelta, Color owner, boolean horizontal) {
-    this.rowDelta = rowDelta;
-    this.columnDelta = columnDelta;
-    this.owner = owner;
-    this.horizontal = horizontal;
-  }
-
-  public int rowDelta() {
-    return rowDelta;
-  }
-
-  public int columnDelta() {
-    return columnDelta;
-  }
-
-  public Color owner() {
-    return owner;
-  }
-
-  public boolean horizontal() {
-    return horizontal;
-  }
 
   public Cell step(int row, int column) {
     return new Cell(row + rowDelta, column + columnDelta);

@@ -1,5 +1,9 @@
 package com.algoridam.games.mechakuchago.rules;
 
+import static com.algoridam.games.mechakuchago.rules.Constants.BOARD_SIZE;
+import static com.algoridam.games.mechakuchago.rules.Constants.MAX_PUSH_DECISIONS;
+import static com.algoridam.games.mechakuchago.rules.Constants.MAX_SLIDE_FRAMES;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -15,121 +19,128 @@ public final class SlideResolver {
   }
 
   public Resolution resolve(Board board, Move black, Move white, Map<String, String> reuseIds) {
-    List<Stone> pieces = new ArrayList<>();
-    for (int row = 0; row < Board.SIZE; row++) {
-      for (int column = 0; column < Board.SIZE; column++) {
+    List<Stone> stones = stonesAlreadyOn(board, reuseIds);
+    List<String> ignoredMoves = new ArrayList<>();
+    placeIncomingStone(board, stones, black, ignoredMoves);
+    placeIncomingStone(board, stones, white, ignoredMoves);
+
+    List<FrameView> frames = new ArrayList<>();
+    frames.add(snapshot(stones, openingEvents(ignoredMoves)));
+    for (int frame = 0; frame < MAX_SLIDE_FRAMES; frame++) {
+      if (!slideOneFrame(stones, frames)) {
+        break;
+      }
+    }
+    appendSettleFrameIfAStoneIsDying(stones, frames);
+    return new Resolution(boardFrom(stones), List.copyOf(frames));
+  }
+
+  private List<Stone> stonesAlreadyOn(Board board, Map<String, String> reuseIds) {
+    List<Stone> stones = new ArrayList<>();
+    for (int row = 0; row < BOARD_SIZE; row++) {
+      for (int column = 0; column < BOARD_SIZE; column++) {
         Color color = board.at(row, column);
         if (color == null) {
           continue;
         }
         String key = row + "," + column;
         String id = reuseIds.getOrDefault(key, "s" + sequence++);
-        pieces.add(Stone.sitting(id, color, row, column));
+        stones.add(Stone.sitting(id, color, row, column));
       }
     }
-
-    List<String> ignored = new ArrayList<>();
-    consider(board, pieces, black, ignored);
-    consider(board, pieces, white, ignored);
-
-    List<FrameView> frames = new ArrayList<>();
-    List<String> opening = new ArrayList<>(ignored);
-    opening.add("Tiles appear at the edge and start sliding.");
-    frames.add(snapshot(pieces, opening));
-
-    for (int frame = 0; frame < 24; frame++) {
-      List<Stone> active = new ArrayList<>();
-      for (Stone piece : pieces) {
-        if (piece.alive() && piece.moving()) {
-          active.add(piece);
-        }
-      }
-      if (active.isEmpty()) {
-        break;
-      }
-
-      Map<String, Plan> plans = new HashMap<>();
-      List<String> events = new ArrayList<>();
-      for (Stone piece : active) {
-        if (piece.arrived()) {
-          plans.put(piece.id(), Plan.stay("arrived", new Cell(piece.row(), piece.column())));
-        }
-      }
-
-      List<Stone> still = new ArrayList<>();
-      for (Stone piece : active) {
-        if (!plans.containsKey(piece.id())) {
-          still.add(piece);
-        }
-      }
-      if (still.size() == 2) {
-        resolvePair(pieces, still.get(0), still.get(1), plans, events);
-      }
-
-      List<Stone> pending = new ArrayList<>();
-      for (Stone piece : still) {
-        if (!plans.containsKey(piece.id())) {
-          pending.add(piece);
-        }
-      }
-      int guard = 0;
-      while (needsDecision(pending, plans) && guard < 6) {
-        guard++;
-        for (Stone piece : orderPending(pending)) {
-          Plan existing = plans.get(piece.id());
-          if (existing != null && existing.type() != Plan.Type.RETRY) {
-            continue;
-          }
-          plans.put(piece.id(), decide(piece, pieces, plans));
-        }
-      }
-      for (Stone piece : pending) {
-        Plan plan = plans.get(piece.id());
-        if (plan == null || plan.type() == Plan.Type.RETRY) {
-          plans.put(piece.id(), Plan.stay("blocked", new Cell(piece.row(), piece.column())));
-        }
-      }
-      lockSharedChains(pieces, plans, events);
-      applyPlans(pieces, plans, events);
-      frames.add(snapshot(pieces, events));
-      pieces.removeIf(piece -> !piece.alive());
-    }
-
-    if (frames.get(frames.size() - 1).stones().stream().anyMatch(StoneView::dying)) {
-      frames.add(snapshot(pieces, List.of("The board settles.")));
-    }
-    return new Resolution(boardFrom(pieces), List.copyOf(frames));
+    return stones;
   }
 
-  private void consider(Board board, List<Stone> pieces, Move move, List<String> ignored) {
+  private void placeIncomingStone(
+      Board board, List<Stone> stones, Move move, List<String> ignoredMoves) {
     if (move == null) {
       return;
     }
     if (board.axisFull(move.direction(), move.index())) {
-      ignored.add(move.player().label() + " chose a full line. The move is ignored.");
+      ignoredMoves.add(move.player().label() + " chose a full line. The move is ignored.");
       return;
     }
-    pieces.add(Stone.mover("m" + sequence++, move));
+    stones.add(Stone.mover("m" + sequence++, move));
   }
 
-  private static void resolvePair(
-      List<Stone> pieces, Stone first, Stone second, Map<String, Plan> plans, List<String> events) {
+  private static List<String> openingEvents(List<String> ignoredMoves) {
+    List<String> events = new ArrayList<>(ignoredMoves);
+    events.add("Tiles appear at the edge and start sliding.");
+    return events;
+  }
+
+  private static boolean slideOneFrame(List<Stone> stones, List<FrameView> frames) {
+    List<Stone> moving = stonesStillMoving(stones);
+    if (moving.isEmpty()) {
+      return false;
+    }
+    Map<String, Plan> plans = new HashMap<>();
+    List<String> events = new ArrayList<>();
+    markStonesThatReachedTheirStop(moving, plans);
+    List<Stone> stillMoving = stonesWithoutAPlan(moving, plans);
+    if (stillMoving.size() == 2) {
+      stopHeadOnOrDestroyCrossingPair(
+          stones, stillMoving.get(0), stillMoving.get(1), plans, events);
+    }
+    List<Stone> waiting = stonesWithoutAPlan(stillMoving, plans);
+    decideWaitingStones(stones, waiting, plans);
+    stopIfStillUndecided(waiting, plans);
+    stopIfBothShoveTheSameLine(stones, plans, events);
+    applyPlans(stones, plans, events);
+    frames.add(snapshot(stones, events));
+    stones.removeIf(stone -> !stone.alive());
+    return true;
+  }
+
+  private static List<Stone> stonesStillMoving(List<Stone> stones) {
+    List<Stone> moving = new ArrayList<>();
+    for (Stone stone : stones) {
+      if (stone.alive() && stone.moving()) {
+        moving.add(stone);
+      }
+    }
+    return moving;
+  }
+
+  private static void markStonesThatReachedTheirStop(List<Stone> moving, Map<String, Plan> plans) {
+    for (Stone stone : moving) {
+      if (stone.arrived()) {
+        plans.put(stone.id(), Plan.stay("arrived", new Cell(stone.row(), stone.column())));
+      }
+    }
+  }
+
+  private static List<Stone> stonesWithoutAPlan(List<Stone> stones, Map<String, Plan> plans) {
+    List<Stone> waiting = new ArrayList<>();
+    for (Stone stone : stones) {
+      if (!plans.containsKey(stone.id())) {
+        waiting.add(stone);
+      }
+    }
+    return waiting;
+  }
+
+  private static void stopHeadOnOrDestroyCrossingPair(
+      List<Stone> stones, Stone first, Stone second, Map<String, Plan> plans, List<String> events) {
     Cell firstNext = first.next();
     Cell secondNext = second.next();
-    boolean swap =
+    boolean swappingPlaces =
         firstNext.row() == second.row()
             && firstNext.column() == second.column()
             && secondNext.row() == first.row()
             && secondNext.column() == first.column();
-    boolean same =
+    boolean enteringTheSameSquare =
         firstNext.row() == secondNext.row()
             && firstNext.column() == secondNext.column()
             && Board.inBounds(firstNext.row(), firstNext.column());
-    if (swap) {
+    if (swappingPlaces) {
       plans.put(first.id(), Plan.stay("headon", new Cell(first.row(), first.column())));
       plans.put(second.id(), Plan.stay("headon", new Cell(second.row(), second.column())));
       events.add("The tiles meet face to face in adjacent squares. Both lines stop.");
-    } else if (same && pieceAt(pieces, firstNext.row(), firstNext.column(), null) == null) {
+      return;
+    }
+    if (enteringTheSameSquare
+        && stoneAt(stones, firstNext.row(), firstNext.column(), null) == null) {
       plans.put(first.id(), Plan.die(firstNext));
       plans.put(second.id(), Plan.die(secondNext));
       events.add(
@@ -139,9 +150,24 @@ public final class SlideResolver {
     }
   }
 
-  private static boolean needsDecision(List<Stone> pending, Map<String, Plan> plans) {
-    for (Stone piece : pending) {
-      Plan plan = plans.get(piece.id());
+  private static void decideWaitingStones(
+      List<Stone> stones, List<Stone> waiting, Map<String, Plan> plans) {
+    int guard = 0;
+    while (aStoneIsStillUndecided(waiting, plans) && guard < MAX_PUSH_DECISIONS) {
+      guard++;
+      for (Stone stone : orderSoTheBlockingStoneIsDecidedFirst(waiting)) {
+        Plan existing = plans.get(stone.id());
+        if (existing != null && existing.type() != Plan.Type.RETRY) {
+          continue;
+        }
+        plans.put(stone.id(), planForStone(stone, stones, plans));
+      }
+    }
+  }
+
+  private static boolean aStoneIsStillUndecided(List<Stone> waiting, Map<String, Plan> plans) {
+    for (Stone stone : waiting) {
+      Plan plan = plans.get(stone.id());
       if (plan == null || plan.type() == Plan.Type.RETRY) {
         return true;
       }
@@ -149,20 +175,20 @@ public final class SlideResolver {
     return false;
   }
 
-  private static List<Stone> orderPending(List<Stone> pending) {
-    List<Stone> ordered = new ArrayList<>(pending);
+  private static List<Stone> orderSoTheBlockingStoneIsDecidedFirst(List<Stone> waiting) {
+    List<Stone> ordered = new ArrayList<>(waiting);
     ordered.sort(
-        (left, right) -> {
-          Cell leftNext = left.next();
-          boolean leftHitsRight =
-              leftNext.row() == right.row() && leftNext.column() == right.column();
-          Cell rightNext = right.next();
-          boolean rightHitsLeft =
-              rightNext.row() == left.row() && rightNext.column() == left.column();
-          if (leftHitsRight && !rightHitsLeft) {
+        (stone, other) -> {
+          Cell stoneNext = stone.next();
+          boolean stoneHitsOther =
+              stoneNext.row() == other.row() && stoneNext.column() == other.column();
+          Cell otherNext = other.next();
+          boolean otherHitsStone =
+              otherNext.row() == stone.row() && otherNext.column() == stone.column();
+          if (stoneHitsOther && !otherHitsStone) {
             return 1;
           }
-          if (rightHitsLeft && !leftHitsRight) {
+          if (otherHitsStone && !stoneHitsOther) {
             return -1;
           }
           return 0;
@@ -170,12 +196,21 @@ public final class SlideResolver {
     return ordered;
   }
 
-  private static Plan decide(Stone piece, List<Stone> pieces, Map<String, Plan> plans) {
-    Cell next = piece.next();
+  private static void stopIfStillUndecided(List<Stone> waiting, Map<String, Plan> plans) {
+    for (Stone stone : waiting) {
+      Plan plan = plans.get(stone.id());
+      if (plan == null || plan.type() == Plan.Type.RETRY) {
+        plans.put(stone.id(), Plan.stay("blocked", new Cell(stone.row(), stone.column())));
+      }
+    }
+  }
+
+  private static Plan planForStone(Stone stone, List<Stone> stones, Map<String, Plan> plans) {
+    Cell next = stone.next();
     if (!Board.inBounds(next.row(), next.column())) {
       return Plan.stay("blocked", next);
     }
-    Stone occupied = pieceAt(pieces, next.row(), next.column(), piece.id());
+    Stone occupied = stoneAt(stones, next.row(), next.column(), stone.id());
     if (occupied == null) {
       return Plan.move(next);
     }
@@ -185,51 +220,52 @@ public final class SlideResolver {
         return Plan.retry();
       }
       if (other.type() == Plan.Type.STAY) {
-        return pushFrom(piece, pieces, next, plans);
+        return shoveOrStop(stone, stones, next, plans);
       }
       return Plan.move(next);
     }
-    return pushFrom(piece, pieces, next, plans);
+    return shoveOrStop(stone, stones, next, plans);
   }
 
-  private static Plan pushFrom(Stone piece, List<Stone> pieces, Cell hit, Map<String, Plan> plans) {
-    Chain chain = chainAhead(pieces, hit, piece.rowDelta(), piece.columnDelta(), plans);
-    if (chain.stones().isEmpty()) {
+  private static Plan shoveOrStop(
+      Stone stone, List<Stone> stones, Cell hit, Map<String, Plan> plans) {
+    Chain line = lineInFront(stones, hit, stone.rowDelta(), stone.columnDelta(), plans);
+    if (line.stones().isEmpty()) {
       return Plan.move(hit);
     }
-    if (!Board.inBounds(chain.beyond().row(), chain.beyond().column())) {
-      return Plan.stay("blocked", new Cell(piece.row(), piece.column()));
+    if (!Board.inBounds(line.beyond().row(), line.beyond().column())) {
+      return Plan.stay("blocked", new Cell(stone.row(), stone.column()));
     }
-    Stone blocker = pieceAt(pieces, chain.beyond().row(), chain.beyond().column(), null);
+    Stone blocker = stoneAt(stones, line.beyond().row(), line.beyond().column(), null);
     if (blocker != null) {
       if (!blocker.moving()) {
-        return Plan.stay("blocked", new Cell(piece.row(), piece.column()));
+        return Plan.stay("blocked", new Cell(stone.row(), stone.column()));
       }
       Plan other = plans.get(blocker.id());
       if (other == null || other.type() == Plan.Type.RETRY) {
         Cell otherNext = blocker.next();
         boolean aimingIntoLine =
-            chain.stones().stream()
+            line.stones().stream()
                 .anyMatch(
-                    stone ->
-                        stone.row() == otherNext.row() && stone.column() == otherNext.column());
+                    sitting ->
+                        sitting.row() == otherNext.row() && sitting.column() == otherNext.column());
         if (!aimingIntoLine) {
           return Plan.retry();
         }
       } else if (other.type() == Plan.Type.STAY || other.type() == Plan.Type.DIE) {
-        return Plan.stay("blocked", new Cell(piece.row(), piece.column()));
+        return Plan.stay("blocked", new Cell(stone.row(), stone.column()));
       }
     }
-    return Plan.push(hit, piece.rowDelta(), piece.columnDelta(), chain.stones());
+    return Plan.push(hit, stone.rowDelta(), stone.columnDelta(), line.stones());
   }
 
-  private static Chain chainAhead(
-      List<Stone> pieces, Cell hit, int rowDelta, int columnDelta, Map<String, Plan> plans) {
-    List<Stone> chain = new ArrayList<>();
+  private static Chain lineInFront(
+      List<Stone> stones, Cell hit, int rowDelta, int columnDelta, Map<String, Plan> plans) {
+    List<Stone> line = new ArrayList<>();
     int row = hit.row();
     int column = hit.column();
     while (Board.inBounds(row, column)) {
-      Stone occupied = pieceAt(pieces, row, column, null);
+      Stone occupied = stoneAt(stones, row, column, null);
       if (occupied == null) {
         break;
       }
@@ -239,234 +275,274 @@ public final class SlideResolver {
           break;
         }
       }
-      chain.add(occupied);
+      line.add(occupied);
       row += rowDelta;
       column += columnDelta;
     }
-    return new Chain(chain, new Cell(row, column));
+    return new Chain(line, new Cell(row, column));
   }
 
-  private static void lockSharedChains(
-      List<Stone> pieces, Map<String, Plan> plans, List<String> events) {
-    List<Map.Entry<String, Plan>> pushers = new ArrayList<>();
+  private static void stopIfBothShoveTheSameLine(
+      List<Stone> stones, Map<String, Plan> plans, List<String> events) {
+    List<Map.Entry<String, Plan>> shoves = new ArrayList<>();
     for (Map.Entry<String, Plan> entry : plans.entrySet()) {
       if (entry.getValue().type() == Plan.Type.PUSH) {
-        pushers.add(entry);
+        shoves.add(entry);
       }
     }
-    if (pushers.size() != 2) {
+    if (shoves.size() != 2) {
       return;
     }
-    Set<String> ids = new HashSet<>();
-    for (Stone stone : pushers.get(0).getValue().chain()) {
-      ids.add(stone.id());
+    Set<String> firstLine = new HashSet<>();
+    for (Stone stone : shoves.get(0).getValue().chain()) {
+      firstLine.add(stone.id());
     }
-    boolean shares = false;
-    for (Stone stone : pushers.get(1).getValue().chain()) {
-      if (ids.contains(stone.id())) {
-        shares = true;
+    boolean sameLine = false;
+    for (Stone stone : shoves.get(1).getValue().chain()) {
+      if (firstLine.contains(stone.id())) {
+        sameLine = true;
         break;
       }
     }
-    if (!shares) {
+    if (!sameLine) {
       return;
     }
-    Stone first = find(pieces, pushers.get(0).getKey());
-    Stone second = find(pieces, pushers.get(1).getKey());
+    Stone first = stoneById(stones, shoves.get(0).getKey());
+    Stone second = stoneById(stones, shoves.get(1).getKey());
     plans.put(first.id(), Plan.stay("lock", new Cell(first.row(), first.column())));
     plans.put(second.id(), Plan.stay("lock", new Cell(second.row(), second.column())));
     events.add("Both tiles shove the same line on this frame. The line locks and both stop.");
   }
 
-  private static void applyPlans(List<Stone> pieces, Map<String, Plan> plans, List<String> events) {
-    Map<String, Plan> pushed = new HashMap<>();
+  private static void applyPlans(List<Stone> stones, Map<String, Plan> plans, List<String> events) {
+    List<Shift> shifts = shiftsFor(stones, plans, shovedStones(plans));
+    Set<String> destroyed = stonesEnteringTheSameSquare(shifts, events);
+    destroyStonesBlockedByASittingStone(stones, shifts, plans, destroyed, events);
+    relocateSurvivors(shifts, destroyed, events);
+    finishStonesThatStayOrDie(stones, plans, events);
+  }
+
+  private static Map<String, Plan> shovedStones(Map<String, Plan> plans) {
+    Map<String, Plan> shoved = new HashMap<>();
     for (Plan plan : plans.values()) {
       if (plan.type() != Plan.Type.PUSH) {
         continue;
       }
       for (Stone stone : plan.chain()) {
-        pushed.put(stone.id(), plan);
+        shoved.put(stone.id(), plan);
       }
     }
+    return shoved;
+  }
 
-    List<Shift> moves = new ArrayList<>();
-    for (Stone piece : pieces) {
-      if (!piece.alive()) {
+  private static List<Shift> shiftsFor(
+      List<Stone> stones, Map<String, Plan> plans, Map<String, Plan> shoved) {
+    List<Shift> shifts = new ArrayList<>();
+    for (Stone stone : stones) {
+      if (!stone.alive()) {
         continue;
       }
-      Plan plan = plans.get(piece.id());
+      Plan plan = plans.get(stone.id());
       if (plan != null && plan.type() == Plan.Type.DIE) {
         continue;
       }
       if (plan != null && plan.type() == Plan.Type.MOVE) {
-        moves.add(new Shift(piece, plan.row(), plan.column(), "move", plan));
+        shifts.add(new Shift(stone, plan.row(), plan.column(), Motion.SLIDE, plan));
         continue;
       }
       if (plan != null && plan.type() == Plan.Type.PUSH) {
-        moves.add(new Shift(piece, plan.row(), plan.column(), "push", plan));
+        shifts.add(new Shift(stone, plan.row(), plan.column(), Motion.SHOVE, plan));
         continue;
       }
-      Plan shove = pushed.get(piece.id());
+      Plan shove = shoved.get(stone.id());
       if (shove != null) {
-        moves.add(
+        shifts.add(
             new Shift(
-                piece,
-                piece.row() + shove.rowDelta(),
-                piece.column() + shove.columnDelta(),
-                "shift",
+                stone,
+                stone.row() + shove.rowDelta(),
+                stone.column() + shove.columnDelta(),
+                Motion.CARRIED,
                 shove));
       }
     }
+    return shifts;
+  }
 
+  private static Set<String> stonesEnteringTheSameSquare(List<Shift> shifts, List<String> events) {
     Map<String, List<Shift>> groups = new HashMap<>();
-    for (Shift move : moves) {
-      groups.computeIfAbsent(move.row + "," + move.column, key -> new ArrayList<>()).add(move);
+    for (Shift shift : shifts) {
+      groups
+          .computeIfAbsent(shift.row() + "," + shift.column(), key -> new ArrayList<>())
+          .add(shift);
     }
-    Set<String> doomed = new HashSet<>();
+    Set<String> destroyed = new HashSet<>();
     for (List<Shift> group : groups.values()) {
-      if (group.size() > 1) {
-        Shift sample = group.get(0);
-        events.add(
-            "Two tiles both enter "
-                + Board.cellName(sample.row, sample.column)
-                + " and are destroyed.");
-        for (Shift move : group) {
-          doomed.add(move.stone.id());
-        }
+      if (group.size() <= 1) {
+        continue;
+      }
+      Shift sample = group.get(0);
+      events.add(
+          "Two tiles both enter "
+              + Board.cellName(sample.row(), sample.column())
+              + " and are destroyed.");
+      for (Shift shift : group) {
+        destroyed.add(shift.stone().id());
       }
     }
+    return destroyed;
+  }
 
-    Set<String> stayCells = new HashSet<>();
-    for (Stone piece : pieces) {
-      if (!piece.alive() || doomed.contains(piece.id())) {
+  private static void destroyStonesBlockedByASittingStone(
+      List<Stone> stones,
+      List<Shift> shifts,
+      Map<String, Plan> plans,
+      Set<String> destroyed,
+      List<String> events) {
+    Set<String> sitting = new HashSet<>();
+    for (Stone stone : stones) {
+      if (!stone.alive() || destroyed.contains(stone.id())) {
         continue;
       }
-      if (moves.stream().anyMatch(move -> move.stone.id().equals(piece.id()))) {
+      if (shifts.stream().anyMatch(shift -> shift.stone().id().equals(stone.id()))) {
         continue;
       }
-      Plan plan = plans.get(piece.id());
+      Plan plan = plans.get(stone.id());
       if (plan != null && plan.type() == Plan.Type.DIE) {
         continue;
       }
-      if (Board.inBounds(piece.row(), piece.column())) {
-        stayCells.add(piece.row() + "," + piece.column());
+      if (Board.inBounds(stone.row(), stone.column())) {
+        sitting.add(stone.row() + "," + stone.column());
       }
     }
-    for (Shift move : moves) {
-      if (doomed.contains(move.stone.id())) {
+    for (Shift shift : shifts) {
+      if (destroyed.contains(shift.stone().id())) {
         continue;
       }
-      if (stayCells.contains(move.row + "," + move.column)) {
-        doomed.add(move.stone.id());
+      if (sitting.contains(shift.row() + "," + shift.column())) {
+        destroyed.add(shift.stone().id());
         events.add(
-            move.stone.color().label()
+            shift.stone().color().label()
                 + " cannot enter "
-                + Board.cellName(move.row, move.column)
+                + Board.cellName(shift.row(), shift.column())
                 + " and is destroyed.");
       }
     }
+  }
 
-    for (Shift move : moves) {
-      if (doomed.contains(move.stone.id())) {
-        move.stone.destroyAt(move.row, move.column);
+  private static void relocateSurvivors(
+      List<Shift> shifts, Set<String> destroyed, List<String> events) {
+    for (Shift shift : shifts) {
+      if (destroyed.contains(shift.stone().id())) {
+        shift.stone().destroyAt(shift.row(), shift.column());
         continue;
       }
-      move.stone.relocate(move.row, move.column);
-      if ("move".equals(move.cause)) {
-        boolean arrived = move.stone.arrived();
+      shift.stone().relocate(shift.row(), shift.column());
+      if (shift.motion() == Motion.SLIDE) {
+        boolean arrived = shift.stone().arrived();
         if (arrived) {
-          move.stone.halt();
+          shift.stone().halt();
         }
         events.add(
-            move.stone.color().label()
+            shift.stone().color().label()
                 + " slides to "
-                + Board.cellName(move.stone.row(), move.stone.column())
+                + Board.cellName(shift.stone().row(), shift.stone().column())
                 + (arrived ? " and stops." : "."));
-      } else if ("push".equals(move.cause)) {
-        move.stone.halt();
+      } else if (shift.motion() == Motion.SHOVE) {
+        shift.stone().halt();
         events.add(
-            move.stone.color().label()
+            shift.stone().color().label()
                 + " shoves a line of "
-                + move.plan.chain().size()
+                + shift.plan().chain().size()
                 + " one square and stops at "
-                + Board.cellName(move.stone.row(), move.stone.column())
+                + Board.cellName(shift.stone().row(), shift.stone().column())
                 + ".");
-      } else if (move.stone.moving()) {
-        move.stone.halt();
+      } else if (shift.stone().moving()) {
+        shift.stone().halt();
       }
     }
+  }
 
+  private static void finishStonesThatStayOrDie(
+      List<Stone> stones, Map<String, Plan> plans, List<String> events) {
     for (Map.Entry<String, Plan> entry : plans.entrySet()) {
       Plan plan = entry.getValue();
       if (plan.type() != Plan.Type.DIE && plan.type() != Plan.Type.STAY) {
         continue;
       }
-      Stone piece = find(pieces, entry.getKey());
-      if (piece == null) {
+      Stone stone = stoneById(stones, entry.getKey());
+      if (stone == null) {
         continue;
       }
       if (plan.type() == Plan.Type.DIE) {
-        piece.destroyAt(plan.at().row(), plan.at().column());
+        stone.destroyAt(plan.at().row(), plan.at().column());
         continue;
       }
-      piece.halt();
-      if (!Board.inBounds(piece.row(), piece.column())) {
+      stone.halt();
+      if (!Board.inBounds(stone.row(), stone.column())) {
         if (plan.intent() != null && Board.inBounds(plan.intent().row(), plan.intent().column())) {
-          piece.relocate(plan.intent().row(), plan.intent().column());
+          stone.relocate(plan.intent().row(), plan.intent().column());
         }
-        piece.destroyAt(piece.row(), piece.column());
-        events.add(piece.color().label() + " cannot enter the line and is lost.");
+        stone.destroyAt(stone.row(), stone.column());
+        events.add(stone.color().label() + " cannot enter the line and is lost.");
       } else if ("blocked".equals(plan.reason())) {
         events.add(
-            piece.color().label()
+            stone.color().label()
                 + " is packed against the edge and stops at "
-                + Board.cellName(piece.row(), piece.column())
+                + Board.cellName(stone.row(), stone.column())
                 + ".");
       }
     }
   }
 
-  private static FrameView snapshot(List<Stone> pieces, List<String> events) {
-    List<StoneView> stones = new ArrayList<>();
-    for (Stone piece : pieces) {
-      if (!piece.alive() && !piece.dying()) {
+  private static void appendSettleFrameIfAStoneIsDying(List<Stone> stones, List<FrameView> frames) {
+    boolean aStoneIsDying =
+        frames.get(frames.size() - 1).stones().stream().anyMatch(StoneView::dying);
+    if (aStoneIsDying) {
+      frames.add(snapshot(stones, List.of("The board settles.")));
+    }
+  }
+
+  private static FrameView snapshot(List<Stone> stones, List<String> events) {
+    List<StoneView> views = new ArrayList<>();
+    for (Stone stone : stones) {
+      if (!stone.alive() && !stone.dying()) {
         continue;
       }
       boolean visible =
-          piece.dying() || piece.moving() || Board.inBounds(piece.row(), piece.column());
+          stone.dying() || stone.moving() || Board.inBounds(stone.row(), stone.column());
       if (visible) {
-        stones.add(piece.view());
+        views.add(stone.view());
       }
     }
-    return new FrameView(List.copyOf(events), List.copyOf(stones));
+    return new FrameView(List.copyOf(events), List.copyOf(views));
   }
 
-  private static Board boardFrom(List<Stone> pieces) {
+  private static Board boardFrom(List<Stone> stones) {
     Board board = Board.empty();
-    for (Stone piece : pieces) {
-      if (piece.alive() && Board.inBounds(piece.row(), piece.column())) {
-        board.place(piece.row(), piece.column(), piece.color());
+    for (Stone stone : stones) {
+      if (stone.alive() && Board.inBounds(stone.row(), stone.column())) {
+        board.place(stone.row(), stone.column(), stone.color());
       }
     }
     return board;
   }
 
-  private static Stone pieceAt(List<Stone> pieces, int row, int column, String ignoreId) {
-    for (Stone piece : pieces) {
-      if (!piece.alive() || piece.id().equals(ignoreId)) {
+  private static Stone stoneAt(List<Stone> stones, int row, int column, String ignoreId) {
+    for (Stone stone : stones) {
+      if (!stone.alive() || stone.id().equals(ignoreId)) {
         continue;
       }
-      if (piece.row() == row && piece.column() == column) {
-        return piece;
+      if (stone.row() == row && stone.column() == column) {
+        return stone;
       }
     }
     return null;
   }
 
-  private static Stone find(List<Stone> pieces, String id) {
-    for (Stone piece : pieces) {
-      if (piece.id().equals(id)) {
-        return piece;
+  private static Stone stoneById(List<Stone> stones, String id) {
+    for (Stone stone : stones) {
+      if (stone.id().equals(id)) {
+        return stone;
       }
     }
     return null;
@@ -476,60 +552,31 @@ public final class SlideResolver {
 
   private record Chain(List<Stone> stones, Cell beyond) {}
 
-  private static final class Shift {
-    private final Stone stone;
-    private final int row;
-    private final int column;
-    private final String cause;
-    private final Plan plan;
-
-    private Shift(Stone stone, int row, int column, String cause, Plan plan) {
-      this.stone = stone;
-      this.row = row;
-      this.column = column;
-      this.cause = cause;
-      this.plan = plan;
-    }
+  private enum Motion {
+    SLIDE,
+    SHOVE,
+    CARRIED
   }
 
-  private static final class Plan {
+  private record Shift(Stone stone, int row, int column, Motion motion, Plan plan) {}
+
+  private record Plan(
+      Type type,
+      int row,
+      int column,
+      int rowDelta,
+      int columnDelta,
+      List<Stone> chain,
+      String reason,
+      Cell intent,
+      Cell at) {
+
     private enum Type {
       MOVE,
       PUSH,
       STAY,
       DIE,
       RETRY
-    }
-
-    private final Type type;
-    private final int row;
-    private final int column;
-    private final int rowDelta;
-    private final int columnDelta;
-    private final List<Stone> chain;
-    private final String reason;
-    private final Cell intent;
-    private final Cell at;
-
-    private Plan(
-        Type type,
-        int row,
-        int column,
-        int rowDelta,
-        int columnDelta,
-        List<Stone> chain,
-        String reason,
-        Cell intent,
-        Cell at) {
-      this.type = type;
-      this.row = row;
-      this.column = column;
-      this.rowDelta = rowDelta;
-      this.columnDelta = columnDelta;
-      this.chain = chain;
-      this.reason = reason;
-      this.intent = intent;
-      this.at = at;
     }
 
     private static Plan move(Cell cell) {
@@ -552,42 +599,6 @@ public final class SlideResolver {
 
     private static Plan retry() {
       return new Plan(Type.RETRY, 0, 0, 0, 0, List.of(), null, null, null);
-    }
-
-    private Type type() {
-      return type;
-    }
-
-    private int row() {
-      return row;
-    }
-
-    private int column() {
-      return column;
-    }
-
-    private int rowDelta() {
-      return rowDelta;
-    }
-
-    private int columnDelta() {
-      return columnDelta;
-    }
-
-    private List<Stone> chain() {
-      return chain;
-    }
-
-    private String reason() {
-      return reason;
-    }
-
-    private Cell intent() {
-      return intent;
-    }
-
-    private Cell at() {
-      return at;
     }
   }
 }

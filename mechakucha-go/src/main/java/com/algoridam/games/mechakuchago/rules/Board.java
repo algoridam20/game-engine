@@ -1,7 +1,7 @@
 package com.algoridam.games.mechakuchago.rules;
 
 public final class Board {
-  public static final int SIZE = 10;
+  public static final int SIZE = Constants.BOARD_SIZE;
 
   private final Color[][] cells = new Color[SIZE][SIZE];
 

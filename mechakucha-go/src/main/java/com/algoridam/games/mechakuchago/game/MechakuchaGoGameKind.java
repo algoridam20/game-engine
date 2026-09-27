@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 @RequiredArgsConstructor
@@ -40,7 +41,7 @@ public class MechakuchaGoGameKind implements GameKind {
   }
 
   private static String seatHandle(RoomSeat seat) {
-    if (seat.handle() != null && !seat.handle().isBlank()) {
+    if (StringUtils.hasText(seat.handle())) {
       return seat.handle();
     }
     return seat.displayName();

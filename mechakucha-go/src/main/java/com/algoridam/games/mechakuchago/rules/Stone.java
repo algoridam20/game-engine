@@ -1,5 +1,11 @@
 package com.algoridam.games.mechakuchago.rules;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
+
+@Getter
+@Accessors(fluent = true)
 public final class Stone {
   private final String id;
   private final Color color;
@@ -7,8 +13,13 @@ public final class Stone {
   private int column;
   private int rowDelta;
   private int columnDelta;
+
+  @Getter(AccessLevel.NONE)
   private final Integer stopRow;
+
+  @Getter(AccessLevel.NONE)
   private final Integer stopColumn;
+
   private boolean alive = true;
   private boolean moving;
   private boolean dying;
@@ -72,42 +83,6 @@ public final class Stone {
         stopRow,
         stopColumn,
         true);
-  }
-
-  public String id() {
-    return id;
-  }
-
-  public Color color() {
-    return color;
-  }
-
-  public int row() {
-    return row;
-  }
-
-  public int column() {
-    return column;
-  }
-
-  public int rowDelta() {
-    return rowDelta;
-  }
-
-  public int columnDelta() {
-    return columnDelta;
-  }
-
-  public boolean alive() {
-    return alive;
-  }
-
-  public boolean moving() {
-    return moving;
-  }
-
-  public boolean dying() {
-    return dying;
   }
 
   public Cell next() {

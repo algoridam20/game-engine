@@ -23,13 +23,13 @@ public class MechakuchaGoRealtimeController {
   public void lockMove(
       @Payload @Valid LockMoveRequest request, SimpMessageHeaderAccessor headerAccessor) {
     PlayerJwtInfo jwt = StompAuth.requireGameJwt(headerAccessor);
-    gameManager.lockMove(jwt.gameId(), jwt.playerId().toString(), request);
+    gameManager.performActionLockMove(jwt.gameId(), jwt.playerId().toString(), request);
   }
 
   @MessageMapping("/game/mechakucha_go/action/next_round")
   public void nextRound(SimpMessageHeaderAccessor headerAccessor) {
     PlayerJwtInfo jwt = StompAuth.requireGameJwt(headerAccessor);
-    gameManager.nextRound(jwt.gameId());
+    gameManager.performActionInitNextRound(jwt.gameId());
   }
 
   @MessageMapping("/game/mechakucha_go/action/publish_state")
