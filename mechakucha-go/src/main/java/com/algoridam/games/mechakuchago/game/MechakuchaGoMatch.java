@@ -77,7 +77,7 @@ public final class MechakuchaGoMatch {
 
   public synchronized void nextRound() {
     if (phase != Phase.SETTLED) {
-      throw new ServiceException(ErrorCode.BAD_REQUEST, "The round is not ready to advance");
+      return;
     }
     round += 1;
     beginRound();

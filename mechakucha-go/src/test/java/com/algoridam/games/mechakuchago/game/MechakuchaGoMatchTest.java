@@ -41,4 +41,21 @@ class MechakuchaGoMatchTest {
             .filter(stone -> !stone.dying())
             .count());
   }
+
+  @Test
+  void nextRoundOpensTheNextChooseAndIgnoresASecondCall() {
+    MechakuchaGoMatch match = new MechakuchaGoMatch("black", "white", "ada", "grace");
+    match.lockMove("black", new Move(Color.BLACK, Direction.RIGHT, 4, 2));
+    match.lockMove("white", new Move(Color.WHITE, Direction.DOWN, 8, 9));
+
+    match.nextRound();
+    PlayerView black = match.viewFor("black");
+    assertEquals("CHOOSE", black.phase());
+    assertEquals(2, black.round());
+    assertTrue(black.frames().isEmpty());
+
+    match.nextRound();
+    assertEquals(2, match.viewFor("black").round());
+    assertEquals("CHOOSE", match.viewFor("white").phase());
+  }
 }
