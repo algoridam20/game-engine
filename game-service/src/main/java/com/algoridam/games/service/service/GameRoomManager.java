@@ -19,23 +19,64 @@ import com.algoridam.games.service.game.GameKindRegistry;
 import com.algoridam.games.service.model.ChatMessage;
 import com.algoridam.games.service.model.GameRoom;
 import com.algoridam.games.service.model.RoomSeat;
+import jakarta.annotation.PreDestroy;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import lombok.RequiredArgsConstructor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class GameRoomManager {
 
+  static final Duration EMPTY_ROOM_RETENTION = Duration.ofMinutes(2);
+
   private final ConcurrentHashMap<UUID, GameRoom> rooms = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<SeatDeparture, Departure> pendingDepartures =
+      new ConcurrentHashMap<>();
   private final GameKindRegistry gameKindRegistry;
   private final PlayerJwtIssuer playerJwtIssuer;
   private final SimpMessageSendingOperations messageTemplate;
+  private final ScheduledExecutorService retentionScheduler;
+  private final boolean ownsRetentionScheduler;
+
+  @Autowired
+  public GameRoomManager(
+      GameKindRegistry gameKindRegistry,
+      PlayerJwtIssuer playerJwtIssuer,
+      SimpMessageSendingOperations messageTemplate) {
+    this(gameKindRegistry, playerJwtIssuer, messageTemplate, newRetentionScheduler(), true);
+  }
+
+  GameRoomManager(
+      GameKindRegistry gameKindRegistry,
+      PlayerJwtIssuer playerJwtIssuer,
+      SimpMessageSendingOperations messageTemplate,
+      ScheduledExecutorService retentionScheduler) {
+    this(gameKindRegistry, playerJwtIssuer, messageTemplate, retentionScheduler, false);
+  }
+
+  private GameRoomManager(
+      GameKindRegistry gameKindRegistry,
+      PlayerJwtIssuer playerJwtIssuer,
+      SimpMessageSendingOperations messageTemplate,
+      ScheduledExecutorService retentionScheduler,
+      boolean ownsRetentionScheduler) {
+    this.gameKindRegistry = gameKindRegistry;
+    this.playerJwtIssuer = playerJwtIssuer;
+    this.messageTemplate = messageTemplate;
+    this.retentionScheduler = retentionScheduler;
+    this.ownsRetentionScheduler = ownsRetentionScheduler;
+  }
 
   public RoomSessionResponse createRoom(CreateRoomRequest request) {
     PlayerJwtInfo jwt = require();
@@ -56,6 +97,7 @@ public class GameRoomManager {
       throw new ServiceException(ErrorCode.BAD_REQUEST, "JWT gameId does not match room");
     }
     if (jwt.gameId() != null && hasPlayer(roomId, jwt.playerId())) {
+      cancelDeparture(roomId, jwt.playerId());
       return issueToken(getRoom(roomId), jwt);
     }
     GameRoom room = getRoom(roomId);
@@ -68,11 +110,13 @@ public class GameRoomManager {
         room.getSeats().add(new RoomSeat(jwt.playerId(), jwt.handle(), jwt.displayName()));
       }
     }
+    cancelDeparture(roomId, jwt.playerId());
     return issueToken(room, jwt);
   }
 
   public void joinRealtime(PlayerJwtInfo jwt) {
     UUID roomId = jwt.gameId();
+    cancelDeparture(roomId, jwt.playerId());
     GameRoom room = getRoom(roomId);
     RoomSeat seat = room.seatOf(jwt.playerId());
     if (seat == null) {
@@ -113,6 +157,34 @@ public class GameRoomManager {
 
   private void exitRoom(UUID playerId, UUID roomId, String leaveMessage) {
     GameRoom room = rooms.get(roomId);
+    if (room == null || room.seatOf(playerId) == null) {
+      return;
+    }
+    SeatDeparture key = new SeatDeparture(roomId, playerId);
+    Departure previous = pendingDepartures.remove(key);
+    if (previous != null) {
+      previous.cancel();
+    }
+    AtomicBoolean cancelled = new AtomicBoolean(false);
+    ScheduledFuture<?> future =
+        retentionScheduler.schedule(
+            () -> completeExit(playerId, roomId, leaveMessage, cancelled),
+            EMPTY_ROOM_RETENTION.toMinutes(),
+            TimeUnit.MINUTES);
+    pendingDepartures.put(key, new Departure(future, cancelled));
+    log.info(
+        "Player {} left room {}; retaining room and game for {} minutes",
+        playerId,
+        roomId,
+        EMPTY_ROOM_RETENTION.toMinutes());
+  }
+
+  private void completeExit(
+      UUID playerId, UUID roomId, String leaveMessage, AtomicBoolean cancelled) {
+    if (cancelled.get()) {
+      return;
+    }
+    GameRoom room = rooms.get(roomId);
     if (room == null) {
       return;
     }
@@ -121,17 +193,50 @@ public class GameRoomManager {
       return;
     }
     GameKind kind = gameKindRegistry.require(room.getGameType());
+    boolean destroyRoom;
     synchronized (room.getSeats()) {
+      if (cancelled.get()) {
+        return;
+      }
+      pendingDepartures.remove(new SeatDeparture(roomId, playerId));
       room.getSeats().removeIf(existing -> existing.playerId().equals(playerId));
+      destroyRoom = room.getSeats().isEmpty();
+      if (destroyRoom) {
+        rooms.remove(roomId, room);
+      }
     }
     kind.onPlayerLeft(roomId, playerId);
     ChatMessage left = createChatMessage(seat.displayName(), leaveMessage, LEAVE);
     messageTemplate.convertAndSend("/topic/room/" + roomId, left);
-    if (room.getSeats().isEmpty()) {
-      rooms.remove(roomId);
+    if (destroyRoom) {
       kind.destroy(roomId);
       log.info("Room {} destroyed", roomId);
     }
+  }
+
+  private void cancelDeparture(UUID roomId, UUID playerId) {
+    Departure pending = pendingDepartures.remove(new SeatDeparture(roomId, playerId));
+    if (pending == null) {
+      return;
+    }
+    pending.cancel();
+    log.info("Player {} returned to room {}; room and game stay active", playerId, roomId);
+  }
+
+  @PreDestroy
+  void shutdownRetention() {
+    if (ownsRetentionScheduler) {
+      retentionScheduler.shutdownNow();
+    }
+  }
+
+  private static ScheduledExecutorService newRetentionScheduler() {
+    return Executors.newSingleThreadScheduledExecutor(
+        runnable -> {
+          Thread thread = new Thread(runnable, "room-retention");
+          thread.setDaemon(true);
+          return thread;
+        });
   }
 
   GameRoom getRoomForTests(UUID roomId) {
@@ -166,5 +271,22 @@ public class GameRoomManager {
       return GameKindRegistry.DEFAULT_GAME_TYPE;
     }
     return request.gameType();
+  }
+
+  private record SeatDeparture(UUID roomId, UUID playerId) {}
+
+  private static final class Departure {
+    private final ScheduledFuture<?> future;
+    private final AtomicBoolean cancelled;
+
+    private Departure(ScheduledFuture<?> future, AtomicBoolean cancelled) {
+      this.future = future;
+      this.cancelled = cancelled;
+    }
+
+    private void cancel() {
+      cancelled.set(true);
+      future.cancel(false);
+    }
   }
 }

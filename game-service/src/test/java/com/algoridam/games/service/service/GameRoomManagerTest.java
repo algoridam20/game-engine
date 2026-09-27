@@ -1,9 +1,11 @@
 package com.algoridam.games.service.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -23,8 +25,12 @@ import com.algoridam.games.service.game.GameKindRegistry;
 import com.algoridam.games.service.model.ChatMessage;
 import com.algoridam.games.service.model.MessageType;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,16 +52,29 @@ class GameRoomManagerTest {
   @Mock private GameKind gameKind;
   @Mock private PlayerJwtIssuer playerJwtIssuer;
   @Mock private SimpMessageSendingOperations messageTemplate;
+  @Mock private ScheduledExecutorService retentionScheduler;
+  @Mock private ScheduledFuture<?> pendingDeparture;
 
+  private final List<Runnable> scheduledDepartures = new ArrayList<>();
   private GameRoomManager gameRoomManager;
 
   @BeforeEach
   void setUp() {
     lenient().when(gameKind.type()).thenReturn(GameKindRegistry.DEFAULT_GAME_TYPE);
     lenient().when(gameKind.maxPlayers()).thenReturn(2);
+    lenient()
+        .when(retentionScheduler.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class)))
+        .thenAnswer(
+            invocation -> {
+              scheduledDepartures.add(invocation.getArgument(0));
+              return pendingDeparture;
+            });
     gameRoomManager =
         new GameRoomManager(
-            new GameKindRegistry(List.of(gameKind)), playerJwtIssuer, messageTemplate);
+            new GameKindRegistry(List.of(gameKind)),
+            playerJwtIssuer,
+            messageTemplate,
+            retentionScheduler);
     lenient()
         .when(playerJwtIssuer.generate(any(), any(), any(), any()))
         .thenAnswer(invocation -> "token-" + invocation.getArgument(3));
@@ -162,11 +181,61 @@ class GameRoomManagerTest {
 
     gameRoomManager.abandonRoom(jwt(joiner, created.roomId()));
 
+    assertEquals(2, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
+    verify(messageTemplate, never())
+        .convertAndSend(eq("/topic/room/" + created.roomId()), any(ChatMessage.class));
+    verify(retentionScheduler)
+        .schedule(
+            any(Runnable.class),
+            eq(GameRoomManager.EMPTY_ROOM_RETENTION.toMinutes()),
+            eq(TimeUnit.MINUTES));
+
+    runScheduledDepartures();
+
     ArgumentCaptor<ChatMessage> captor = ArgumentCaptor.forClass(ChatMessage.class);
     verify(messageTemplate).convertAndSend(eq("/topic/room/" + created.roomId()), captor.capture());
     assertEquals("Abandoned", captor.getValue().getMessage());
     assertEquals(MessageType.LEAVE, captor.getValue().getType());
     assertEquals(1, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
+    verify(gameKind, never()).destroy(any());
+  }
+
+  @Test
+  void exitRoom_keepsEmptyRoomAndGameForTwoMinutes() {
+    UUID playerId = UUID.randomUUID();
+    authenticate(playerId, null);
+    RoomSessionResponse created = gameRoomManager.createRoom(null);
+
+    gameRoomManager.exitRoom(playerId, created.roomId());
+
+    assertEquals(1, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
+    verify(gameKind, never()).destroy(any());
+    verify(retentionScheduler)
+        .schedule(
+            any(Runnable.class),
+            eq(GameRoomManager.EMPTY_ROOM_RETENTION.toMinutes()),
+            eq(TimeUnit.MINUTES));
+
+    runScheduledDepartures();
+
+    assertNull(gameRoomManager.getRoomForTests(created.roomId()));
+    verify(gameKind).destroy(created.roomId());
+  }
+
+  @Test
+  void exitRoom_rejoinBeforeRetentionEnds_keepsRoomAndGame() {
+    UUID playerId = UUID.randomUUID();
+    authenticate(playerId, null);
+    RoomSessionResponse created = gameRoomManager.createRoom(null);
+
+    gameRoomManager.exitRoom(playerId, created.roomId());
+    gameRoomManager.joinRealtime(jwt(playerId, created.roomId()));
+
+    verify(pendingDeparture).cancel(false);
+    runScheduledDepartures();
+
+    assertEquals(1, gameRoomManager.getRoomForTests(created.roomId()).getSeats().size());
+    verify(gameKind, never()).destroy(any());
   }
 
   @Test
@@ -224,6 +293,12 @@ class GameRoomManagerTest {
     assertSame(
         gameRoomManager.getRoomForTests(created.roomId()),
         gameRoomManager.getRoomForTests(created.roomId()));
+  }
+
+  private void runScheduledDepartures() {
+    List<Runnable> due = List.copyOf(scheduledDepartures);
+    scheduledDepartures.clear();
+    due.forEach(Runnable::run);
   }
 
   private void authenticate(UUID playerId, UUID gameId) {
