@@ -12,6 +12,7 @@
         <module>game-road-not-taken</module>
         <module>game-service</module>
         <module>game-seven-eight</module>
+        <module>mechakucha-go</module>
         <module>game-leaderboard-service</module>
     </modules>
 
@@ -66,6 +67,11 @@
             <dependency>
                 <groupId>com.algoridam.games</groupId>
                 <artifactId>game-seven-eight</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.algoridam.games</groupId>
+                <artifactId>mechakucha-go</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

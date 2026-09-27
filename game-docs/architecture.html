@@ -47,6 +47,7 @@ flowchart LR
         <tr><td><code>game-player-service</code></td><td>Passkeys, players, session JWT, Spring Security, CORS</td></tr>
         <tr><td><code>game-service</code></td><td>Rooms, seats, chat, SockJS/STOMP, <code>GameKind</code> SPI, STOMP probe</td></tr>
         <tr><td><code>game-seven-eight</code></td><td>7-8 rules plugin: <code>GameKind</code> + <code>/app/v1/game/7_8/...</code></td></tr>
+        <tr><td><code>mechakucha-go</code></td><td>Sliding Gomoku plugin: <code>GameKind</code> <code>MECHAKUCHA_GO</code> + <code>/app/v1/game/mechakucha_go/...</code></td></tr>
         <tr><td><code>game-road-not-taken</code></td><td>Empty plugin slot for a later game</td></tr>
         <tr><td><code>game-leaderboard-service</code></td><td>Placeholder leaderboard library</td></tr>
         <tr><td><code>game-server</code></td><td>Boot jar, <code>application.yml</code>, static <code>/dev</code> pages</td></tr>
@@ -61,7 +62,8 @@ flowchart LR
       </thead>
       <tbody>
         <tr><td><code>src/app/join</code></td><td>Passkey signup/login, then create/join room</td></tr>
-        <tr><td><code>src/app/game/[gameId]</code></td><td>Board + chat for one room UUID</td></tr>
+        <tr><td><code>src/app/game/[gameId]</code></td><td>7-8 board + chat for one room UUID</td></tr>
+        <tr><td><code>src/app/mechakucha-go</code></td><td>Mechakucha Go lobby, then <code>/mechakucha-go/[gameId]</code> for the sliding board</td></tr>
         <tr><td><code>src/state/AuthStore.js</code></td><td>Persists session JWT and game JWT</td></tr>
         <tr><td><code>src/state/GameState.js</code></td><td>Combines chat + 7-8 slices; owns STOMP session</td></tr>
         <tr><td><code>src/api/rest</code></td><td>Passkeys and <code>/api/v1/room/*/init</code></td></tr>
@@ -95,6 +97,7 @@ sequenceDiagram
         <tr><td>Client SEND</td><td><code>/app/v1/chat/join</code></td><td>Seat realtime; start or republish game</td></tr>
         <tr><td>Client SEND</td><td><code>/app/v1/chat/send_message</code></td><td>Chat text</td></tr>
         <tr><td>Client SEND</td><td><code>/app/v1/game/7_8/action/*</code></td><td>Trump, play, next round, publish</td></tr>
+        <tr><td>Client SEND</td><td><code>/app/v1/game/mechakucha_go/action/*</code></td><td>Lock a slide, next round, publish</td></tr>
         <tr><td>Server MESSAGE</td><td><code>/topic/room/{roomId}</code></td><td>Join / leave / chat</td></tr>
         <tr><td>Server MESSAGE</td><td><code>/topic/room/{roomId}/player/{playerId}</code></td><td>Fogged 7-8 state</td></tr>
       </tbody>

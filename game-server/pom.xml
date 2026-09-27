@@ -30,6 +30,10 @@
         </dependency>
         <dependency>
             <groupId>com.algoridam.games</groupId>
+            <artifactId>mechakucha-go</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.algoridam.games</groupId>
             <artifactId>game-road-not-taken</artifactId>
         </dependency>
         <dependency>

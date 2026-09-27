@@ -7,6 +7,7 @@ COPY game-commons/pom.xml game-commons/pom.xml
 COPY game-player-service/pom.xml game-player-service/pom.xml
 COPY game-service/pom.xml game-service/pom.xml
 COPY game-seven-eight/pom.xml game-seven-eight/pom.xml
+COPY mechakucha-go/pom.xml mechakucha-go/pom.xml
 COPY game-road-not-taken/pom.xml game-road-not-taken/pom.xml
 COPY game-leaderboard-service/pom.xml game-leaderboard-service/pom.xml
 COPY game-server/pom.xml game-server/pom.xml
@@ -15,6 +16,7 @@ COPY game-commons game-commons
 COPY game-player-service game-player-service
 COPY game-service game-service
 COPY game-seven-eight game-seven-eight
+COPY mechakucha-go mechakucha-go
 COPY game-road-not-taken game-road-not-taken
 COPY game-leaderboard-service game-leaderboard-service
 COPY game-server game-server
